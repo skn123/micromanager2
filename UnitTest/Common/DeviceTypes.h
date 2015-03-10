@@ -4,7 +4,7 @@
 
 #include <string>
 #include <sstream>
-#include "MMDevice/MMDevice.h"
+#include "micromanager2/MMDevice/MMDevice.h"
 
 inline std::string getDeviceTypeVerbose(MM::DeviceType t)
 {

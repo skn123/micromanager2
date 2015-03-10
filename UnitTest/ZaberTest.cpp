@@ -1,4 +1,4 @@
-#include "MMCore/MMCore.h"
+#include "micromanager2/MMCore/MMCore.h"
 #include "UnitTest/Common/PropertyTypes.h"
 #include "UnitTest/Common/DeviceTypes.h"
 #include <iostream>

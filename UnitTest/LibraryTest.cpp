@@ -1,6 +1,6 @@
 // LibraryTest.cpp : Defines the entry point for the console application.
 //
-#include "MMCore/MMCore.h"
+#include "micromanager2/MMCore/MMCore.h"
 #include "UnitTest/Common/DeviceTypes.h"
 #include <iostream>
 #include <iomanip>

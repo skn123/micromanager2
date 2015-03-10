@@ -1,7 +1,7 @@
 #==============================================================================#
 #MMCore: This is the core plugin manager
 #==============================================================================#
-SET(MMCore_DIR ${PROJECT_SOURCE_DIR}/MMCore)
+SET(MMCore_DIR ${PROJECT_SOURCE_DIR}/micromanager2/MMCore)
 SET(MMCore_SUBDIRS  Devices
                     LibraryInfo
                     LoadableModules
