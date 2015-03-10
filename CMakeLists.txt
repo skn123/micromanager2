@@ -18,7 +18,7 @@ SET(BOOST_MANDATORY_COMPONENTS
 
 #This is my integrated development environment and should not affect other builds
 #Set this to off for builds that depend on regular FIND_PACKAGE commands
-SET(USE_INTEGRATED_DEV ON CACHE BOOL "Use Integrated Build Environment?")
+SET(USE_INTEGRATED_DEV ON CACHE BOOL "Use Integrated Build Environment?") 
 IF(USE_INTEGRATED_DEV)
   SET(MODULAR_MANDATORY_LIB_LIST boost-1_55)
   IF(MSVC)
