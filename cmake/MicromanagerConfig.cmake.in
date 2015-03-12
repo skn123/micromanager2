@@ -1,0 +1,42 @@
+#==============================================================================#
+#
+# MicromanagerConfig.cmake :  CMake configuration file for external projects.
+#
+# This file is configured by Micromanager and used by the UseMicromanager.cmake module
+# to load Micromanager settings for an external project. We make all paths relative to
+# the location of this path
+#==============================================================================#
+# The path of this config file
+GET_FILENAME_COMPONENT(Micromanager_CONFIG_PATH "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+# Micromanager's include directories.
+SET(Micromanager_INCLUDE_DIRS ${Micromanager_CONFIG_PATH}/../include)
+
+# Micromanager's  library directories.
+SET(Micromanager_LIBRARY_DIRS ${Micromanager_CONFIG_PATH}/../lib)
+
+# The location of the UseMicromanager.cmake file.
+SET(Micromanager_USE_FILE ${Micromanager_CONFIG_PATH}/UseMicromanager.cmake)
+
+# A list of all libraries for Micromanager.  Those listed here should
+# automatically pull in their dependencies.
+SET(Micromanager_LIBRARIES
+    "@MMGr_LIB_Release@"
+    "@MMGr_LIB_Debug@"
+)
+
+#------------------------------------------------------------------------------#
+#Copy all Micromanager Runtime libraries that will be part of the build tree
+#------------------------------------------------------------------------------#
+FILE(GLOB MMGR_LIB_LIST ${Micromanager_CONFIG_PATH}/../bin/*${LIB_EXTN})
+FOREACH(MATCH_LIB ${MMGR_LIB_LIST})
+  STRING(REGEX MATCH "_d"${LIB_EXTN} TDBG "${MATCH_LIB}")
+  IF(TDBG)
+    #This is a debug library
+    LIST(APPEND DEBUG_LIBS_TO_BE_COPIED ${MATCH_LIB})
+  ELSE()
+    #This is a release library
+    LIST(APPEND RELEASE_LIBS_TO_BE_COPIED ${MATCH_LIB})
+  ENDIF()
+ENDFOREACH()
+
