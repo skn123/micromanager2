@@ -30,7 +30,7 @@ SET(Micromanager_LIBRARIES
 #------------------------------------------------------------------------------#
 FILE(GLOB MMGR_LIB_LIST ${Micromanager_CONFIG_PATH}/../bin/*${LIB_EXTN})
 FOREACH(MATCH_LIB ${MMGR_LIB_LIST})
-  STRING(REGEX MATCH "_d"${LIB_EXTN} TDBG "${MATCH_LIB}")
+  STRING(REGEX MATCH "_d${LIB_EXTN}" TDBG "${MATCH_LIB}")
   IF(TDBG)
     #This is a debug library
     LIST(APPEND DEBUG_LIBS_TO_BE_COPIED ${MATCH_LIB})
