@@ -19,4 +19,5 @@ SET_TARGET_PROPERTIES(  MMDevice_MMCore PROPERTIES
 ADD_LIBRARY(MMDevice_DeviceAdapters OBJECT ${MMDevice_SRCS_FOR_DeviceAdapters})
 SET_TARGET_PROPERTIES(  MMDevice_DeviceAdapters PROPERTIES 
                         COMPILE_FLAGS "-DMODULE_EXPORTS") 
+SET(MMGR_DIRS ${MMGR_DIRS} ${PROJECT_SOURCE_DIR}/micromanager2/MMDevice)
                         
