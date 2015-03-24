@@ -63,7 +63,8 @@ CScanner::CScanner(const char* name) :
    polygonRepetitions_(0),
    ring_buffer_supported_(false),
    laser_side_(0),   // will be set to 1 or 2 if used
-   laserTTLenabled_(false)
+   laserTTLenabled_(false),
+   refreshOverride_(false)
 {
 
    // initialize these structs
@@ -276,8 +277,8 @@ int CScanner::Initialize()
    CreateProperty(g_ScannerBeamEnabledPropertyName, g_YesState, MM::String, false, pAct);
    AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_NoState);
    AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_YesState);
-   UpdateProperty(g_ScannerBeamEnabledPropertyName);  // calls UpdateIlluminationState()
    UpdateIlluminationState();
+   UpdateProperty(g_ScannerBeamEnabledPropertyName);
 
    // single-axis mode settings
    // todo fix firmware TTL initialization problem where SAM p=2 triggers by itself 1st time
@@ -500,21 +501,6 @@ int CScanner::Initialize()
 
    if (firmwareVersion_ > 2.875)  // 2.88+
    {
-      laserTTLenabled_ = hub_->IsDefinePresent(build, "MM_LASER_TTL");
-      if (laserTTLenabled_)
-      {
-         pAct = new CPropertyAction (this, &CScanner::OnLaserOutputMode);
-         CreateProperty(g_LaserOutputModePropertyName, "0", MM::String, false, pAct);
-         AddAllowedValue(g_LaserOutputModePropertyName, g_SPIMLaserOutputMode_0);
-         AddAllowedValue(g_LaserOutputModePropertyName, g_SPIMLaserOutputMode_1);
-         AddAllowedValue(g_LaserOutputModePropertyName, g_SPIMLaserOutputMode_2);
-         UpdateProperty(g_LaserOutputModePropertyName);
-
-         pAct = new CPropertyAction (this, &CScanner::OnLaserSwitchTime);
-         CreateProperty(g_LaserSwitchTimePropertyName, "0", MM::Float, false, pAct);
-         UpdateProperty(g_LaserSwitchTimePropertyName);
-      }
-
       // populate laser_side_ appropriately
       command.str("");
       command << "Z2B " << axisLetterX_ << "?";
@@ -530,6 +516,24 @@ int CScanner::Initialize()
          case 0: laser_side_ = 1; break;
          case 3:
          case 2: laser_side_ = 2; break;
+      }
+
+      laserTTLenabled_ = hub_->IsDefinePresent(build, "MM_LASER_TTL");
+      if (laserTTLenabled_)
+      {
+         pAct = new CPropertyAction (this, &CScanner::OnLaserOutputMode);
+         CreateProperty(g_LaserOutputModePropertyName, "0", MM::String, false, pAct);
+         AddAllowedValue(g_LaserOutputModePropertyName, g_SPIMLaserOutputMode_0);
+         AddAllowedValue(g_LaserOutputModePropertyName, g_SPIMLaserOutputMode_1);
+         AddAllowedValue(g_LaserOutputModePropertyName, g_SPIMLaserOutputMode_2);
+         UpdateProperty(g_LaserOutputModePropertyName);
+
+         pAct = new CPropertyAction (this, &CScanner::OnLaserSwitchTime);
+         CreateProperty(g_LaserSwitchTimePropertyName, "0", MM::Float, false, pAct);
+         UpdateProperty(g_LaserSwitchTimePropertyName);
+
+         // update the laser settings based on the beam on/off
+         SetIlluminationStateHelper(illuminationState_);
       }
    }
 
@@ -1329,14 +1333,14 @@ int CScanner::OnSAPeriodX(MM::PropertyBase* pProp, MM::ActionType eAct)
 
 int CScanner::OnSAModeX(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
-   static bool justSet = false;
    ostringstream command; command.str("");
    ostringstream response; response.str("");
    long tmp = 0;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_ && !justSet)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << "SAM " << axisLetterX_ << "?";
       response << ":A " << axisLetterX_ << "=";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
@@ -1352,7 +1356,6 @@ int CScanner::OnSAModeX(MM::PropertyBase* pProp, MM::ActionType eAct)
       }
       if (!success)
          return DEVICE_INVALID_PROPERTY_VALUE;
-      justSet = false;
       saStateX_.mode = tmp;
    }
    else if (eAct == MM::AfterSet) {
@@ -1370,7 +1373,7 @@ int CScanner::OnSAModeX(MM::PropertyBase* pProp, MM::ActionType eAct)
          saStateX_.mode = tmp;
          // get the updated value right away if it isn't just turning on/off
          if (tmp > 1) {
-            justSet = true;
+            refreshOverride_ = true;
             return OnSAModeX(pProp, MM::BeforeGet);
          }
       }
@@ -1504,14 +1507,14 @@ int CScanner::OnSAPeriodY(MM::PropertyBase* pProp, MM::ActionType eAct)
 
 int CScanner::OnSAModeY(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
-   static bool justSet = false;
    ostringstream command; command.str("");
    ostringstream response; response.str("");
    long tmp = 0;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_ && !justSet)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << "SAM " << axisLetterY_ << "?";
       response << ":A " << axisLetterY_ << "=";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
@@ -1527,7 +1530,6 @@ int CScanner::OnSAModeY(MM::PropertyBase* pProp, MM::ActionType eAct)
       }
       if (!success)
          return DEVICE_INVALID_PROPERTY_VALUE;
-      justSet = false;
       saStateY_.mode = tmp;
    }
    else if (eAct == MM::AfterSet) {
@@ -1545,7 +1547,7 @@ int CScanner::OnSAModeY(MM::PropertyBase* pProp, MM::ActionType eAct)
          saStateY_.mode = tmp;
          // get the updated value right away if it isn't just turning on/off
          if (tmp > 1) {
-            justSet = true;
+            refreshOverride_ = true;
             return OnSAModeY(pProp, MM::BeforeGet);
          }
       }
@@ -3091,11 +3093,11 @@ int CScanner::OnRBRunning(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    ostringstream command; command.str("");
    long tmp = 0;
-   static bool justSet;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_ && !justSet)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << addressChar_ << ((firmwareVersion_ < 2.885) ? "RM X?" : "RM F?");
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(),
             (firmwareVersion_ < 2.885) ? ":A X=" : ":A F="));
@@ -3111,11 +3113,10 @@ int CScanner::OnRBRunning(MM::PropertyBase* pProp, MM::ActionType eAct)
       }
       if (!success)
          return DEVICE_INVALID_PROPERTY_VALUE;
-      justSet = false;
    }
    else if (eAct == MM::AfterSet)
    {
-      justSet = true;
+      refreshOverride_ = true;
       return OnRBRunning(pProp, MM::BeforeGet);
    }
    return DEVICE_OK;

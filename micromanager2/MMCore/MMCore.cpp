@@ -5062,7 +5062,7 @@ vector<char> CMMCore::readFromSerialPort(const char* portLabel) throw (CMMError)
    boost::shared_ptr<SerialInstance> pSerial =
       deviceManager_->GetDeviceOfType<SerialInstance>(portLabel);
 
-   const int bufLen = 1024; // internal chunk size limit
+   const int bufLen = 256;//1024; // internal chunk size limit
    unsigned char answerBuf[bufLen];
    unsigned long read;
    int ret = pSerial->Read(answerBuf, bufLen, read);
