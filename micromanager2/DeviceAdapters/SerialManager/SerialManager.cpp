@@ -709,10 +709,24 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
    char theData = 0;
 
    MM::MMTime startTime = GetCurrentMMTime();
+   MM::MMTime retryWarnTime(0);
    MM::MMTime answerTimeout(answerTimeoutMs_ * 1000.0);
-   MM::MMTime nonTerminatedAnswerTimeout(5.0 * 1000.0); // For bug-compatibility
+   // warn of retries every 200 ms.
+   MM::MMTime retryWarnInterval(0, 200000);
+   int retryCounter = 0;
    while ((GetCurrentMMTime() - startTime)  < answerTimeout)
    {
+      MM::MMTime tNow = GetCurrentMMTime();
+      if ( retryWarnInterval < tNow - retryWarnTime)
+      {
+         retryWarnTime = tNow;
+         if( 1 < retryCounter)
+         {
+            LogMessage((std::string("GetAnswer # retries = ") + 
+                boost::lexical_cast<std::string,int>(retryCounter)).c_str(), true);
+         }
+        retryCounter++;
+      }
       bool anyRead =  pPort_->ReadOneCharacter(theData);        
       if( anyRead )
       {
@@ -728,6 +742,7 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
       {
          //Yield to other threads:
          CDeviceUtils::SleepMs(1);
+         ++retryCounter;
       }
 
       // look for the terminator, if any
@@ -735,8 +750,14 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
       {
          // check for terminating sequence
          char* termPos = strstr(answer, term);
-         if (termPos != 0) // found the terminator
+         if (termPos != 0)
          {
+            // found the terminator!!
+
+            if( 2 < retryCounter )
+               LogMessage(("GetAnswer # retries = " +
+                  boost::lexical_cast<std::string>(retryCounter)).c_str(), true);
+
             LogAsciiCommunication("GetAnswer", true, answer);
 
             // erase the terminator from the answer:
@@ -748,23 +769,17 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
       else
       {
          // XXX Shouldn't it be an error to not have a terminator?
-         // TODO Make it a precondition check (immediate error) once we've made
-         // sure that no device adapter calls us without a terminator. For now,
-         // keep the behavior for the sake of bug-compatibility.
-
-         MM::MMTime elapsed = GetCurrentMMTime() - startTime;
-         if (elapsed > nonTerminatedAnswerTimeout)
+         if( 4 < retryCounter)
          {
+            LogMessage(("GetAnswer without terminator returned after " + 
+               boost::lexical_cast<std::string>((long)((GetCurrentMMTime() - startTime).getMsec())) +
+               "msec").c_str(), true);
             LogAsciiCommunication("GetAnswer", true, answer);
-            long millisecs = static_cast<long>(elapsed.getMsec());
-            LogMessage(("GetAnswer without terminator returning after " +
-                     boost::lexical_cast<std::string>(millisecs) +
-                     "msec").c_str(), true);
             return DEVICE_OK;
          }
       }
-   }
 
+   } // end while
    LogMessage("TERM_TIMEOUT error occured!");
    return ERR_TERM_TIMEOUT;
 }
@@ -777,9 +792,7 @@ int SerialPort::Write(const unsigned char* buf, unsigned long bufLen)
    if (bufLen == 0) {
       return DEVICE_OK;
    }
-   
-   // Purge the previous data in the buffer
-   //Purge();
+
    if (transmitCharWaitMs_ < 0.001)
    {
       pPort_->WriteCharactersAsynchronously(reinterpret_cast<const char*>(buf), bufLen);
@@ -803,8 +816,7 @@ int SerialPort::Read(unsigned char* buf, unsigned long bufLen, unsigned long& ch
 {
    if (!initialized_)
       return ERR_PORT_NOTINITIALIZED;
-   // Purge the previous data in the buffer
-   //Purge();
+
    unsigned long charsReadOld = 0;
    int r = DEVICE_OK;
    if( 0 < bufLen)
