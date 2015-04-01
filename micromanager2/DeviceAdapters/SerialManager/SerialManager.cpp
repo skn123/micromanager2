@@ -779,7 +779,7 @@ int SerialPort::Write(const unsigned char* buf, unsigned long bufLen)
    }
    
    // Purge the previous data in the buffer
-   Purge();
+   //Purge();
    if (transmitCharWaitMs_ < 0.001)
    {
       pPort_->WriteCharactersAsynchronously(reinterpret_cast<const char*>(buf), bufLen);
@@ -804,7 +804,7 @@ int SerialPort::Read(unsigned char* buf, unsigned long bufLen, unsigned long& ch
    if (!initialized_)
       return ERR_PORT_NOTINITIALIZED;
    // Purge the previous data in the buffer
-   Purge();
+   //Purge();
    unsigned long charsReadOld = 0;
    int r = DEVICE_OK;
    if( 0 < bufLen)

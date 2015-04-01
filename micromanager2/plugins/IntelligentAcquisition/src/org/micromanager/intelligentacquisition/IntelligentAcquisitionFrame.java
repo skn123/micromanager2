@@ -59,9 +59,9 @@ import org.micromanager.utils.JavaUtils;
 public class IntelligentAcquisitionFrame extends javax.swing.JFrame {
    private final ScriptInterface gui_;
    private final CMMCore core_;
-   private Preferences prefs_;
+   private final Preferences prefs_;
    
-   private NumberFormat nf_;
+   private final NumberFormat nf_;
 
    private int frameXPos_ = 100;
    private int frameYPos_ = 100;
@@ -92,7 +92,7 @@ public class IntelligentAcquisitionFrame extends javax.swing.JFrame {
   
    private String xyStage_ = "";
    
-   private AtomicBoolean stop_;
+   private final AtomicBoolean stop_;
 
 
     /** 
@@ -650,7 +650,7 @@ public class IntelligentAcquisitionFrame extends javax.swing.JFrame {
 
             while (!stop_.get()) {
                // run exploration acquisition
-               String expAcq = "";
+               String expAcq;
                try {
                   expAcq = gui_.runAcquisition();
                } catch (MMScriptException e) {
@@ -761,14 +761,13 @@ public class IntelligentAcquisitionFrame extends javax.swing.JFrame {
 
             stop_.set(false);
             // take the active ImageJ image
-            ImagePlus siPlus = null;
+            ImagePlus siPlus;
             try {
                siPlus = IJ.getImage();
             } catch (Exception ex) {
                return;
             }
             MMWindow mw = new MMWindow(siPlus);
-
             
             ResultsTable outTable = new ResultsTable();
             String outTableName = Terms.RESULTTABLENAME;
@@ -790,13 +789,13 @@ public class IntelligentAcquisitionFrame extends javax.swing.JFrame {
                   ResultsTable res = ij.measure.ResultsTable.getResultsTable();
                   // get results out, stick them in new window that has listeners coupling to image window 
                   if (res.getCounter() > 0) {
+                     String[] headings = res.getHeadings();
                      for (int i = 0; i < res.getCounter(); i++) {
-                        double xPos = res.getValue(Terms.X, i);
-                        double yPos = res.getValue(Terms.Y, i);
                         outTable.incrementCounter();
                         outTable.addValue(Terms.POSITION, p);
-                        outTable.addValue(Terms.X, xPos);
-                        outTable.addValue(Terms.Y, yPos);
+                        for (String header : headings) {
+                           outTable.addValue(header, res.getValue(header, i));
+                        }
                      }
                   }
                   outTable.show(outTableName);

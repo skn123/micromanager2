@@ -59,7 +59,9 @@ public class FileMenu {
                   @Override
                   public void run() {
                      File f = studio_.promptForAcquisitionToOpen(true);
-                     recentFiles_.add(f);
+                     if (!recentFiles_.contains(f)) {
+                        recentFiles_.add(f);
+                     }
                      writeFilesToPref(prefs_, PREFKEYBASE, recentFiles_);
                      makeRecentFileRamMenu(openRecentRamMenu_, recentFiles_);
                   }
@@ -123,7 +125,11 @@ public class FileMenu {
    private void makeRecentFileRamMenu(JMenu recentFileMenu, 
            EvictingQueue<File> fileQueue) {
       recentFileMenu.removeAll();
-      for (final File f : fileQueue.toArray(new File[fileQueue.size()])) {
+      // travers the EvictingQueue in reverse order so that the most recently
+      // opened file shows up first
+      File[] fileQueueArray = fileQueue.toArray(new File[fileQueue.size()]);
+      for (int i = fileQueueArray.length - 1; i >= 0; i--) {
+         final File f = fileQueueArray[i];
          String p = f.getParent();
          if (f.isDirectory()) {
             p = f.getAbsolutePath();

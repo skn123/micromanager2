@@ -74,6 +74,7 @@ public class Properties {
       SPIM_NUM_SIDES("SPIMNumSides"),
       SPIM_NUM_SLICES("SPIMNumSlices"),
       SPIM_NUM_REPEATS("SPIMNumRepeats"),
+      SPIM_DELAY_REPEATS("SPIMDelayBeforeRepeat(ms)"),
       SPIM_NUM_SCANSPERSLICE("SPIMNumScansPerSlice"),
       SPIM_NUM_SLICES_PER_PIEZO("SPIMNumSlicesPerPiezo"),
       SPIM_LINESCAN_PERIOD("SingleAxisXPeriod(ms)"),
@@ -123,6 +124,16 @@ public class Properties {
       PLOGIC_EDIT_CELL_INPUT_4("EditCellInput4"),
       PLOGIC_EDIT_CELL_UPDATES("EditCellUpdateAutomatically"),
       PLOGIC_OUTPUT_CHANNEL("OutputChannel"),
+      STAGESCAN_NUMLINES("ScanNumLines"),
+      STAGESCAN_STATE("ScanState"),
+      STAGESCAN_PATTERN("ScanPattern"),
+      STAGESCAN_FAST_START("ScanFastAxisStartPosition(mm)"),
+      STAGESCAN_FAST_STOP("ScanFastAxisStopPosition(mm)"),
+      STAGESCAN_SLOW_START("ScanSlowAxisStartPosition(mm)"),
+      STAGESCAN_SLOW_STOP("ScanSlowAxisStopPosition(mm)"),
+      STAGESCAN_OVERSHOOT_FACTOR("ScanOvershootFactor"),
+      STAGESCAN_MOTOR_SPEED("MotorSpeedX-S(mm/s)"),
+      STAGESCAN_MOTOR_ACCEL("AccelerationX-AC(ms)"),
       TRIGGER_SOURCE("TRIGGER SOURCE"),   // for Hamamatsu
       TRIGGER_POLARITY("TriggerPolarity"),// for Hamamatsu
       TRIGGER_ACTIVE("TRIGGER ACTIVE"),   // for Hamamatsu
@@ -179,6 +190,9 @@ public class Properties {
       PLUGIN_MULTICHANNEL_MODE("MultiChannelMode"),
       PREFS_USE_MULTIPOSITION("MultiPositionMode"),
       PREFS_USE_TIMEPOINTS("UseTimePoints"),
+      PLUGIN_AUTOFOCUS_DEBUG("DebugMode"),
+      PLUGIN_AUTOFOCUS_NRIMAGES("AutofocusNrImages"),
+      PLUGIN_AUTOFOCUS_STEPSIZE("AutofocusStepSize")
       ;
       private final String text;
       private final boolean hasPattern;  // true if string has substitution pattern
@@ -214,8 +228,8 @@ public class Properties {
       JS_RIGHT_WHEEL("22 - right wheel"),
       JS_LEFT_WHEEL("23 - left wheel"),
       SPIM_ARMED("Armed"),
-      SPIM_RUNNING("Running"),
-      SPIM_IDLE("Idle"),
+      SPIM_RUNNING("Running"),  // also used for stage scan
+      SPIM_IDLE("Idle"),        // also used for stage scan
       SAM_DISABLED("0 - Disabled"),
       SAM_ENABLED("1 - Enabled"),
       SAM_RAMP("0 - Ramp"),
@@ -240,6 +254,8 @@ public class Properties {
       PLOGIC_CHANNEL_BNC7("output 7 only"),
       PLOGIC_CHANNEL_BNC8("output 8 only"),
       PLOGIC_AND4("10 - 4-input AND"),
+      RASTER("Raster"),
+      SERPENTINE("Serpentine"),
       INTERNAL("INTERNAL"),
       EXTERNAL("EXTERNAL"),
       INTERNAL_LC("Internal"),
