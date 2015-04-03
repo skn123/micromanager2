@@ -49,6 +49,8 @@ import net.miginfocom.swing.MigLayout;
 
 import org.micromanager.MMStudio;
 import org.micromanager.api.ScriptInterface;
+import org.micromanager.asidispim.Utils.AutofocusUtils;
+import org.micromanager.asidispim.api.ASIdiSPIMException;
 import org.micromanager.internalinterfaces.LiveModeListener;
 import org.micromanager.utils.ReportingUtils;
 
@@ -65,6 +67,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
    private final Joystick joystick_;
    private final Positions positions_;
    private final Cameras cameras_;
+   private final AutofocusUtils autofocus_;
    private final Prefs prefs_;
    private final StagePositionUpdater posUpdater_;
    private final ScriptInterface gui_;
@@ -95,9 +98,16 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
    private final StoredFloatLabel imagingPiezoStartPositionLabel_;
    private final StoredFloatLabel imagingPiezoStopPositionLabel_;
 
-   public SetupPanel(ScriptInterface gui, Devices devices, Properties props, 
-           Joystick joystick, Devices.Sides side, Positions positions, 
-           Cameras cameras, Prefs prefs, StagePositionUpdater posUpdater) {
+   public SetupPanel(ScriptInterface gui, 
+           Devices devices, 
+           Properties props, 
+           Joystick joystick, 
+           final Devices.Sides side, 
+           Positions positions, 
+           Cameras cameras, 
+           Prefs prefs, 
+           StagePositionUpdater posUpdater,
+           AutofocusUtils autofocus) {
       super(MyStrings.PanelNames.SETUP.toString() + side.toString(),
               new MigLayout(
               "",
@@ -109,6 +119,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       joystick_ = joystick;
       positions_ = positions;
       cameras_ = cameras;
+      autofocus_ = autofocus;
       prefs_ = prefs;
       posUpdater_ = posUpdater;
       gui_ = gui;
@@ -283,6 +294,22 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
             } catch (Exception ex) {
                MyDialogUtils.showError(ex);
             }
+         }
+      });
+      sheetPanel.add(tmp_but, "center");
+      
+      tmp_but = new JButton("Focus");
+      tmp_but.setMargin(new Insets(4,8,4,8));
+      tmp_but.setToolTipText("Autofocus");
+      tmp_but.setBackground(Color.green);
+      tmp_but.addActionListener(new ActionListener() {
+         @Override
+         public void actionPerformed(ActionEvent e) {
+            try {
+               autofocus_.runFocus(side,
+                  ASIdiSPIM.getFrame().getAcquisitionPanel().getSliceTiming());
+            } catch (ASIdiSPIMException ex) {
+               MyDialogUtils.showError(ex, "Autofocus failed.  Sorry!");}
          }
       });
       sheetPanel.add(tmp_but, "center, wrap");

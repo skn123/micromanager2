@@ -71,7 +71,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import mmcorej.CMMCore;
-import mmcorej.Configuration;
 import mmcorej.TaggedImage;
 
 import org.micromanager.api.MultiStagePosition;
@@ -80,6 +79,7 @@ import org.micromanager.api.ScriptInterface;
 import org.micromanager.api.ImageCache;
 import org.micromanager.api.MMTags;
 import org.micromanager.MMStudio;
+import org.micromanager.acquisition.ComponentTitledBorder;
 import org.micromanager.acquisition.DefaultTaggedImageSink;
 import org.micromanager.acquisition.MMAcquisition;
 import org.micromanager.acquisition.TaggedImageQueue;
@@ -90,6 +90,7 @@ import org.micromanager.utils.ImageUtils;
 import org.micromanager.utils.NumberUtils;
 import org.micromanager.utils.FileDialogs;
 import org.micromanager.utils.MDUtils;
+import org.micromanager.utils.MMFrame;
 import org.micromanager.utils.MMScriptException;
 import org.micromanager.utils.ReportingUtils;
 
@@ -103,9 +104,10 @@ import java.awt.geom.Point2D;
 
 import javax.swing.BorderFactory;
 
-import org.micromanager.acquisition.ComponentTitledBorder;
+
 import org.micromanager.asidispim.Data.ChannelSpec;
-import org.micromanager.utils.MMFrame;
+import org.micromanager.asidispim.Utils.ControllerUtils;
+import org.micromanager.asidispim.Utils.AutofocusUtils;
 
 /**
  *
@@ -120,6 +122,8 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
    private final Joystick joystick_;
    private final Cameras cameras_;
    private final Prefs prefs_;
+   private final ControllerUtils controller_;
+   private final AutofocusUtils autofocus_;
    private final Positions positions_;
    private final CMMCore core_;
    private final ScriptInterface gui_;
@@ -183,7 +187,9 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
            Cameras cameras, 
            Prefs prefs, 
            StagePositionUpdater posUpdater,
-           Positions positions) {
+           Positions positions,
+           ControllerUtils controller,
+           AutofocusUtils autofocus) {
       super(MyStrings.PanelNames.ACQUSITION.toString(),
               new MigLayout(
               "",
@@ -197,6 +203,8 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       prefs_ = prefs;
       posUpdater_ = posUpdater;
       positions_ = positions;
+      controller_ = controller;
+      autofocus_ = autofocus;
       core_ = gui_.getMMCore();
       numTimePointsDone_ = 0;
       sliceTiming_ = new SliceTiming();
@@ -296,6 +304,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             }
          }
       });
+      desiredSlicePeriod_.addChangeListener(recalculateTimingDisplayCL);
       
       // special field that is enabled/disabled depending on whether advanced timing is enabled
       desiredLightExposureLabel_ = new JLabel("Sample exposure [ms]:"); 
@@ -311,8 +320,10 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             if (!MyNumberUtils.floatsEqual(val, nearestValid)) {
                PanelUtils.setSpinnerFloatValue(desiredLightExposure_, nearestValid);
             }
+            recalculateSliceTiming(!minSlicePeriodCB_.isSelected());
          }
       });
+      desiredLightExposure_.addChangeListener(recalculateTimingDisplayCL);
       volPanel_.add(desiredLightExposure_, "wrap");
       
       calculateSliceTiming_ = new JButton("Calculate slice timing");
@@ -761,6 +772,10 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       updateActualTimeLapseDurationLabel();
    }
    
+   public SliceTiming getSliceTiming() {
+      return sliceTiming_;
+   }
+   
    /**
     * Sets the acquisition name prefix programmatically.
     * Added so that name prefix can be changed from a script.
@@ -805,6 +820,10 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       }
    }
    
+   private float getDelayBeforeSide() {
+      return PanelUtils.getSpinnerFloatValue(delaySide_);
+   }
+   
    private boolean isTwoSided() {
       return (numSides_.getSelectedIndex() == 1);
    }
@@ -831,17 +850,25 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       return multiChannelPanel_.getUsedChannels().length;
    }
    
+   private boolean isStageScanning() {
+      AcquisitionModes.Keys spimMode = getAcquisitionMode();
+      return (spimMode == AcquisitionModes.Keys.STAGE_SCAN || spimMode == AcquisitionModes.Keys.STAGE_SCAN_INTERLEAVED);
+   }
+   
    /**
-    * @return MultichannelModes.Keys.NONE if channels is disabled, or actual selection otherwise
+    * @return MultichannelModes.Keys.NONE if channels are disabled, or actual 
+    * selection otherwise
     */
    private MultichannelModes.Keys getChannelMode() {
-      if (!isMultichannel()) {
+      if (isMultichannel()) {
       return MultichannelModes.getKeyFromPrefCode(
-            props_.getPropValueInteger(Devices.Keys.PLUGIN, Properties.Keys.PLUGIN_MULTICHANNEL_MODE));
+            props_.getPropValueInteger(Devices.Keys.PLUGIN, 
+                    Properties.Keys.PLUGIN_MULTICHANNEL_MODE));
       } else {
          return MultichannelModes.Keys.NONE;
       }
    }
+     
    
    private int getLineScanPeriod() {
       return (Integer) lineScanPeriod_.getValue();
@@ -855,7 +882,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       return (Integer) numSlices_.getValue();
    }
    
-   private double getStepSizeUm() {
+   private float getStepSizeUm() {
       return PanelUtils.getSpinnerFloatValue(stepSize_);
    }
    
@@ -1012,30 +1039,16 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       PanelUtils.setSpinnerFloatValue(delayCamera_, sliceTiming_.cameraDelay);
       PanelUtils.setSpinnerFloatValue(durationCamera_, sliceTiming_.cameraDuration );
    }
-   
-   /**
-    * Compute slice period in ms based on controller's timing settings.
-    * @return period in ms
-    */
-   private double computeActualSlicePeriod() {
-      double period = Math.max(Math.max(
-            PanelUtils.getSpinnerFloatValue(delayScan_) +   // scan time
-            (getLineScanPeriod() * getNumScansPerSlice()),
-                  PanelUtils.getSpinnerFloatValue(delayLaser_)
-                  + PanelUtils.getSpinnerFloatValue(durationLaser_)  // laser time
-            ),
-            PanelUtils.getSpinnerFloatValue(delayCamera_)
-            + PanelUtils.getSpinnerFloatValue(durationCamera_)  // camera time
-            );
-      return period;
-   }
 
+   
    /**
     * Update the displayed slice period.
     */
    private void updateActualSlicePeriodLabel() {
+      recalculateSliceTiming(false);
       actualSlicePeriodLabel_.setText(
-            NumberUtils.doubleToDisplayString(computeActualSlicePeriod()) +
+            NumberUtils.doubleToDisplayString(
+                    controller_.computeActualSlicePeriod(sliceTiming_)) +
             " ms");
    }
    
@@ -1044,19 +1057,20 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
     * @return duration in ms
     */
    private double computeActualVolumeDuration() {
-      double stackDuration = getNumSlices() * computeActualSlicePeriod();
+      double stackDuration = getNumSlices()
+              * controller_.computeActualSlicePeriod(sliceTiming_);
       switch (getAcquisitionMode()) {
-      case STAGE_SCAN:
-      case STAGE_SCAN_INTERLEAVED:
+         case STAGE_SCAN:
+         case STAGE_SCAN_INTERLEAVED:
          // 20 ms acceleration time, and we go twice the acceleration distance
-         // which ends up being acceleration time plus half again
-         // TODO make this computation more general
-         double rampDuration = 20 * 1.5;
-         return getNumSides() * getNumChannels() * 
-               (rampDuration*2 + stackDuration);
-      default: // piezo scan
-         return getNumSides() * getNumChannels() * 
-         (PanelUtils.getSpinnerFloatValue(delaySide_) + stackDuration);
+            // which ends up being acceleration time plus half again
+            // TODO make this computation more general
+            double rampDuration = 20 * 1.5;
+            return getNumSides() * getNumChannels()
+                    * (rampDuration * 2 + stackDuration);
+         default: // piezo scan
+            return getNumSides() * getNumChannels()
+                    * (getDelayBeforeSide() + stackDuration);
       }
    }
    
@@ -1252,371 +1266,29 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
     * @param hardwareTimepoints
     * @return false if there was some error that should abort acquisition
     */
-   private boolean prepareControllerForAquisition(Devices.Sides side, boolean hardwareTimepoints) {
+   private boolean prepareControllerForAquisition(Devices.Sides side, 
+           boolean hardwareTimepoints) {
       
-      Devices.Keys galvoDevice = Devices.getSideSpecificKey(Devices.Keys.GALVOA, side);
-      Devices.Keys piezoDevice = Devices.getSideSpecificKey(Devices.Keys.PIEZOA, side);
-      
-      boolean ignoreMissingScanner = prefs_.getBoolean(MyStrings.PanelNames.SETTINGS.toString(),  
-            Properties.Keys.PREFS_IGNORE_MISSING_SCANNER, false);
-      boolean haveMissingScanner = !devices_.isValidMMDevice(galvoDevice);
-      boolean skipScannerWarnings = ignoreMissingScanner && haveMissingScanner;
-      
-      MultichannelModes.Keys channelMode = getChannelMode();
-      boolean useChannels = isMultichannel();
-      
-      // checks to prevent hard-to-diagnose other errors
-      if (!ignoreMissingScanner && haveMissingScanner) {
-         MyDialogUtils.showError("Scanner device required; please check Devices tab.");
-            return false;
-      }
-
-      // if we are changing color slice by slice then set controller to do multiple slices per piezo move
-      // otherwise just set to 1 slice per piezo move
-      int numSlicesPerPiezo = 1;
-      if (useChannels && channelMode == MultichannelModes.Keys.SLICE_HW) {
-         numSlicesPerPiezo = getNumChannels();
-      }
-      props_.setPropValue(galvoDevice, Properties.Keys.SPIM_NUM_SLICES_PER_PIEZO,
-            numSlicesPerPiezo, skipScannerWarnings);
-      
-      // set controller to do multiple volumes per start trigger if we are doing
-      //   multiple channels with  hardware switching of channel volume by volume
-      // otherwise (no channels, software switching, slice by slice HW switching)
-      //   just do one volume per start trigger
-      int numVolumesPerTrigger = 1;
-      if (useChannels && channelMode == MultichannelModes.Keys.VOLUME_HW) {
-         numVolumesPerTrigger = getNumChannels();
-      }
-      // can either trigger controller once for all the timepoints and
-      //  have the number of repeats pre-programmed (hardware timing)
-      //  or let plugin send trigger for each time point (software timing)
-      float delayRepeats = 0f;
-      if (hardwareTimepoints && useTimepointsCB_.isSelected()) {
-         float volumeDurationMs = (float) computeActualVolumeDuration();
-         float volumeIntervalMs = (float) getTimePointInterval() * 1000f;
-         delayRepeats = volumeIntervalMs - volumeDurationMs;
-         numVolumesPerTrigger = getNumTimepoints();
-      }
-      props_.setPropValue(galvoDevice, Properties.Keys.SPIM_DELAY_REPEATS, delayRepeats, skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.SPIM_NUM_REPEATS, numVolumesPerTrigger, skipScannerWarnings);
-      
-      AcquisitionModes.Keys spimMode = (AcquisitionModes.Keys) spimMode_.getSelectedItem();
-      
-      // figure out the piezo parameters
-      int numSlices = getNumSlices();
-      float piezoCenter = prefs_.getFloat(
-            MyStrings.PanelNames.SETUP.toString() + side.toString(), 
-            Properties.Keys.PLUGIN_PIEZO_CENTER_POS, 0);
-      
-      // if we set piezoAmplitude to 0 here then sliceAmplitude will also be 0
-      float piezoAmplitude;
-      switch (spimMode) {
-      case NO_SCAN:
-      case STAGE_SCAN:
-      case STAGE_SCAN_INTERLEAVED:
-         piezoAmplitude = 0.0f;
-         break;
-      default:
-            piezoAmplitude = (numSlices - 1) * (float)getStepSizeUm();
-      }
-      
-      // tweak the parameters if we are using synchronous/overlap mode
-      // object is to get exact same piezo/scanner positions in first
-      // N frames (piezo/scanner will move to N+1st position but no image taken)
-      CameraModes.Keys cameraMode = CameraModes.getKeyFromPrefCode(
-            prefs_.getInt(MyStrings.PanelNames.SETTINGS.toString(),
-                  Properties.Keys.PLUGIN_CAMERA_MODE, 0));
-      if (cameraMode == CameraModes.Keys.OVERLAP) {
-         piezoAmplitude *= ((float)numSlices)/(numSlices-1);
-         piezoCenter += piezoAmplitude/(2*numSlices);
-         numSlices += 1;
-      }
-      
-      float sliceRate = prefs_.getFloat(
-            MyStrings.PanelNames.SETUP.toString() + side.toString(), 
-            Properties.Keys.PLUGIN_RATE_PIEZO_SHEET, -80);
-      if (MyNumberUtils.floatsEqual(sliceRate, 0.0f)) {
-         MyDialogUtils.showError("Rate for slice " + side.toString() + 
-               " cannot be zero. Re-do calibration on Setup tab.");
-         return false;
-      }
-      float sliceOffset = prefs_.getFloat(
-            MyStrings.PanelNames.SETUP.toString() + side.toString(), 
-            Properties.Keys.PLUGIN_OFFSET_PIEZO_SHEET, 0);
-      float sliceAmplitude = piezoAmplitude / sliceRate;
-      float sliceCenter = (piezoCenter - sliceOffset) / sliceRate;
-
-      // get the micro-mirror card ready
-      // SA_AMPLITUDE_X_DEG and SA_OFFSET_X_DEG done by setup tabs
-      boolean triangleWave = prefs_.getBoolean(
-            MyStrings.PanelNames.SETTINGS.toString(),  
-            Properties.Keys.PREFS_SCAN_OPPOSITE_DIRECTIONS, false);
-      Properties.Values scanPattern = triangleWave ?
-            Properties.Values.SAM_TRIANGLE : Properties.Values.SAM_RAMP;
-      props_.setPropValue(galvoDevice, Properties.Keys.SA_PATTERN_X, 
-              scanPattern, skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.SA_AMPLITUDE_Y_DEG,
-            sliceAmplitude, skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.SA_OFFSET_Y_DEG,
-            sliceCenter, skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.BEAM_ENABLED,
-            Properties.Values.NO, skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.SPIM_NUM_SLICES,
-            numSlices, skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.SPIM_NUM_SIDES,
-            getNumSides(), skipScannerWarnings);
-      props_.setPropValue(galvoDevice, Properties.Keys.SPIM_FIRSTSIDE,
-            getFirstSide(), skipScannerWarnings);
-      
-      // get the piezo card ready; skip if no piezo specified
-      if (devices_.isValidMMDevice(piezoDevice)) {
-         // if mode SLICE_SCAN_ONLY we have computed slice movement as if we
-         //   were moving the piezo but now make piezo stay still
-         if (spimMode.equals(AcquisitionModes.Keys.SLICE_SCAN_ONLY)) {
-            piezoAmplitude = 0.0f;
-         }
-         props_.setPropValue(piezoDevice,
-               Properties.Keys.SA_AMPLITUDE, piezoAmplitude);
-         props_.setPropValue(piezoDevice,
-               Properties.Keys.SA_OFFSET, piezoCenter);
-         props_.setPropValue(piezoDevice,
-               Properties.Keys.SPIM_NUM_SLICES, numSlices);
-         props_.setPropValue(piezoDevice,
-               Properties.Keys.SPIM_STATE, Properties.Values.SPIM_ARMED);
-      }
-      
-      // set up stage scan parameters if necessary
-      // TODO test with actual sample
-      if (spimMode == AcquisitionModes.Keys.STAGE_SCAN || spimMode == AcquisitionModes.Keys.STAGE_SCAN_INTERLEAVED) {
-         // algorithm is as follows:
-         // use the # of slices and slice spacing that the user specifies
-         // because the XY stage is 45 degrees from the objectives have to move it sqrt(2) * slice step size
-         // for now use the current X position as the start of acquisition and always start in positive X direction
-         // for now always do serpentine scan with 2 passes at the same Y location, one pass each direction over the sample
-         // => total scan distance = # slices * slice step size * sqrt(2)
-         //    scan start position = current X position
-         //    scan stop position = scan start position + total distance
-         //    slow axis start = current Y position
-         //    slow axis stop = current Y position
-         //    X motor speed = slice step size * sqrt(2) / slice duration
-         //    number of scans = number of sides (1 or 2)
-         //    scan mode = serpentine
-         //    X acceleration time = 20 ms (may need optimization, depend on X speed)
-         //    scan overshoot factor = 1 (may need optimization, depend on X speed)
-         //    note that "ramp length" is actually twice the distance covered during acceleration
-         //      so it takes 1.5*acceleration time to cover the ramp length
-         final Devices.Keys xyDevice = Devices.Keys.XYSTAGE;
-         double sliceDuration = computeActualSlicePeriod();
-         
-         double requestedMotorSpeed = getStepSizeUm() * Math.sqrt(2.) / sliceDuration;
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_MOTOR_SPEED, (float)requestedMotorSpeed);
-         // get the actual speed and calculate the actual step size
-         // TODO maybe want to not actually update spinner but still take it into account in metadata?
-         double actualMotorSpeed = props_.getPropValueFloat(xyDevice, Properties.Keys.STAGESCAN_MOTOR_SPEED);
-         stepSize_.setValue(actualMotorSpeed / Math.sqrt(2.) * sliceDuration);
-         
-         double scanDistance = getNumSlices() * getStepSizeUm() * Math.sqrt(2.);  // updated stepSize_
-         Point2D.Double posUm;
-         try {
-            posUm = core_.getXYStagePosition(devices_.getMMDevice(xyDevice));
-         } catch (Exception ex) {
-            MyDialogUtils.showError("Could not get XY stage position for stage scan initialization");
-            return false;
-         }
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_FAST_START,
-               (float)(posUm.x / 1000d));
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_FAST_STOP,
-               (float)((posUm.x + scanDistance) / 1000d));
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_SLOW_START,
-               (float)(posUm.y / 1000d));
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_SLOW_STOP,
-               (float)(posUm.y / 1000d));
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_NUMLINES, getNumSides());
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_PATTERN,
-               Properties.Values.SERPENTINE);
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_OVERSHOOT_FACTOR, 1.0f);
-         props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_MOTOR_ACCEL, 20);
-      }
-      
-      return true;
+      return controller_.prepareControllerForAquisition(
+              side, 
+              hardwareTimepoints, 
+              getChannelMode(),
+              isMultichannel(),
+              getNumChannels(),
+              getNumSlices(),
+              getNumTimepoints(),
+              getTimePointInterval(),
+              getNumSides(),
+              getFirstSide(),
+              useTimepointsCB_.isSelected(),
+              getAcquisitionMode(),
+              getDelayBeforeSide(),
+              getStepSizeUm(),
+              sliceTiming_
+      );
    }
    
-   /**
-    * Gets the associated PLogic BNC from the channel (containing preset name) 
-    * @param channel
-    * @return value 5, 6, 7, or 8; returns 0 if there is an error
-    */
-   private int getPLogicOutputFromChannel(ChannelSpec channel) {
-      try {
-         Configuration configData = core_.getConfigData(multiChannelPanel_.getChannelGroup(), channel.config_);
-         if (!configData.isPropertyIncluded(devices_.getMMDevice(Devices.Keys.PLOGIC), Properties.Keys.PLOGIC_OUTPUT_CHANNEL.toString())) {
-            MyDialogUtils.showError("Must include PLogic \"OutputChannel\" in preset for hardware switching");
-            return 0;
-         }
-         String setting = configData.getSetting(devices_.getMMDevice(Devices.Keys.PLOGIC), Properties.Keys.PLOGIC_OUTPUT_CHANNEL.toString()).getPropertyValue();
-         if (setting.equals(Properties.Values.PLOGIC_CHANNEL_BNC5.toString())) {
-            return 5;
-         } else if (setting.equals(Properties.Values.PLOGIC_CHANNEL_BNC6.toString())) {
-            return 6;
-         } else if (setting.equals(Properties.Values.PLOGIC_CHANNEL_BNC7.toString())) {
-            return 7;
-         } else if (setting.equals(Properties.Values.PLOGIC_CHANNEL_BNC8.toString())) {
-            return 8;
-         } else {
-            MyDialogUtils.showError("Channel preset setting must use PLogic \"OutputChannel\" and be set to one of outputs 5-8 only");
-            return 0;
-         }
-      } catch (Exception e) {
-         MyDialogUtils.showError(e, "Could not get PLogic output from channel");
-         return 0;
-      }
-   }
-
-   /**
-    * Programs the PLogic card for hardware channel switching
-    * according to the selections in the Multichannel subpanel
-    * @return false if there is a fatal error, true if successful
-    */
-   private boolean setupHardwareChannelSwitching() {
-      
-      final int counterLSBAddress = 3;
-      final int counterMSBAddress = 4;
-      final int laserTriggerAddress = 10;  // this should be (42 || 8) = (TTL1 || manual laser on)
-      final int invertAddress = 64;
-      
-      if (!devices_.isValidMMDevice(Devices.Keys.PLOGIC)) {
-         MyDialogUtils.showError("PLogic card required for hardware switching");
-         return false;
-      }
-      
-      // set up clock for counters
-      MultichannelModes.Keys channelMode = getChannelMode();
-      switch (channelMode) {
-      case SLICE_HW:
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-               Properties.Values.PLOGIC_PRESET_CLOCK_LASER);
-         break;
-      case VOLUME_HW:
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-               Properties.Values.PLOGIC_PRESET_CLOCK_SIDE);
-         break;
-      default:
-         MyDialogUtils.showError("Unknown multichannel mode for hardware switching");
-         return false;
-      }
-      
-      // set up hardware counter
-      switch (getNumChannels()) {
-      case 1:
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-               Properties.Values.PLOGIC_PRESET_COUNT_1);
-      break;
-      case 2:
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-               Properties.Values.PLOGIC_PRESET_COUNT_2);
-         break;
-      case 3:
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-               Properties.Values.PLOGIC_PRESET_COUNT_3);
-         break;
-      case 4:
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-               Properties.Values.PLOGIC_PRESET_COUNT_4);
-         break;
-      default:
-         MyDialogUtils.showError("Hardware channel switching only supports 1-4 channels");
-         return false;
-      }
-      
-      // speed things up by turning off updates, will restore value later
-      String editCellUpdates = props_.getPropValueString(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_UPDATES);
-      props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_UPDATES, Properties.Values.NO);
-      
-      // initialize cells 13-16 which control BNCs 5-8
-      for (int cellNum=13; cellNum<=16; cellNum++) {
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_POINTER_POSITION, cellNum);
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_TYPE, Properties.Values.PLOGIC_AND4);
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_INPUT_2, laserTriggerAddress);
-         // note that PLC diSPIM assumes "laser + side" output mode is selected for micro-mirror card
-      }
-      
-      // identify BNC from the preset and set counter inputs for 13-16 appropriately 
-      ChannelSpec[] channels = multiChannelPanel_.getUsedChannels();
-      boolean[] hardwareChannelUsed = new boolean[4]; // initialized to all false
-      for (int channelNum = 0; channelNum < channels.length; channelNum++) {
-         // we already know there are between 1 and 4 channels
-         int outputNum = getPLogicOutputFromChannel(channels[channelNum]);
-         if (outputNum<5) {  // check for error in getPLogicOutputFromChannel()
-            // restore update setting
-            props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_UPDATES, editCellUpdates);
-            return false;  // already displayed error
-         }
-         // make sure we don't have multiple Micro-Manager channels using same hardware channel
-         if (hardwareChannelUsed[outputNum-5]) {
-            // restore update setting
-            props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_UPDATES, editCellUpdates);
-            MyDialogUtils.showError("Multiple channels cannot use same laser for PLogic triggering");
-            return false;
-         } else {
-            hardwareChannelUsed[outputNum-5] = true;
-         }
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_POINTER_POSITION, outputNum + 8);
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_INPUT_1, invertAddress);  // enable this AND4
-         // map the channel number to the equivalent addresses for the AND4
-         // inputs should be either 3 (for LSB high) or 67 (for LSB low)
-         //                     and 4 (for MSB high) or 68 (for MSB low)
-         int in3 = (channelNum & 0x01) > 0 ? counterLSBAddress : counterLSBAddress + invertAddress;
-         int in4 = (channelNum & 0x02) > 0 ? counterMSBAddress : counterMSBAddress + invertAddress; 
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_INPUT_3, in3);
-         props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_INPUT_4, in4);
-      }
-      
-      // make sure cells 13-16 are controlling BNCs 5-8
-      props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET,
-            Properties.Values.PLOGIC_PRESET_BNC5_8_ON_13_16);
-      
-      // restore update setting
-      props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_EDIT_CELL_UPDATES, editCellUpdates);
-      
-      return true;
-   }
    
-   /**
-    * Triggers the Tiger controller
-    * @return false only if there is a problem
-    */
-   private boolean triggerControllerStartAcquisition(AcquisitionModes.Keys spimMode) {
-      switch (spimMode) {
-      case STAGE_SCAN:
-      case STAGE_SCAN_INTERLEAVED:
-         // for stage scan we send trigger to stage card, which sends
-         //    hardware trigger to the micro-mirror card
-         props_.setPropValue(Devices.Keys.GALVOA, Properties.Keys.SPIM_STATE,
-               Properties.Values.SPIM_ARMED);
-         props_.setPropValue(Devices.Keys.XYSTAGE, Properties.Keys.STAGESCAN_STATE,
-               Properties.Values.SPIM_RUNNING);
-         break;
-      case PIEZO_SLICE_SCAN:
-      case SLICE_SCAN_ONLY:
-      case NO_SCAN:
-         // only matters which device we trigger if there are two micro-mirror cards
-         //   which hasn't ever been done in practice yet
-         if (isFirstSideA()) {
-            props_.setPropValue(Devices.Keys.GALVOA, Properties.Keys.SPIM_STATE,
-                  Properties.Values.SPIM_RUNNING);
-         } else {
-            props_.setPropValue(Devices.Keys.GALVOB, Properties.Keys.SPIM_STATE,
-                  Properties.Values.SPIM_RUNNING);
-         }
-         break;
-      default:
-         MyDialogUtils.showError("Unknown acquisition mode");
-         return false;
-      }
-      return true;
-   }
-
    /**
     * Implementation of acquisition that orchestrates image
     * acquisition itself rather than using the acquisition engine.
@@ -1731,7 +1403,11 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             break;
          case VOLUME_HW:
          case SLICE_HW:
-            if (!setupHardwareChannelSwitching()) {
+            if (!controller_.setupHardwareChannelSwitching(
+                    useChannels,
+                    nrChannels,
+                    multiChannelPanel_.getUsedChannels(),
+                    multiChannelPanel_.getChannelGroup() )) {
                return false;
             }
             nrChannelsSoftware = 1;
@@ -1796,10 +1472,10 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       AcquisitionModes.Keys spimMode = getAcquisitionMode();
       
       boolean autoShutter = core_.getAutoShutter();
-      boolean shutterOpen = false;
+      boolean shutterOpen = false;  // will read later
 
       // more sanity checks
-      double sliceDuration = computeActualSlicePeriod();
+      double sliceDuration = controller_.computeActualSlicePeriod(sliceTiming_);
       if (exposureTime + cameraReadoutTime > sliceDuration) {
          // only possible to mess this up using advanced timing settings
          MyDialogUtils.showError("Exposure time is longer than time needed for a line scan.\n" +
@@ -1824,7 +1500,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                   + " with hardware channel switching volume-by-volume.");
             return false;
          }
-         if (spimMode == AcquisitionModes.Keys.STAGE_SCAN || spimMode == AcquisitionModes.Keys.STAGE_SCAN_INTERLEAVED) {
+         if (isStageScanning()) {
             // stage scanning needs to be triggered for each time point
             MyDialogUtils.showError("Cannot use hardware time points (small time point interval)"
                   + " with stage scanning.");
@@ -1871,6 +1547,14 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             MyDialogUtils.showError(ex, "Problem getting camera ROIs");
          }
       }
+      
+      // seems to have a problem if the core's camera has been set to some other
+      // camera before we start doing things, so set to a SPIM camera
+      try {
+         core_.setCameraDevice(firstCamera);
+      } catch (Exception ex) {
+         MyDialogUtils.showError(ex, "could not set camera");
+      }
 
       // empty out circular buffer
       try {
@@ -1878,6 +1562,16 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       } catch (Exception ex) {
          MyDialogUtils.showError(ex, "Error emptying out the circular buffer");
          return false;
+      }
+      
+      Point2D.Double xyPosUm = new Point2D.Double();
+      if (isStageScanning()) {
+         try {
+            xyPosUm = core_.getXYStagePosition(devices_.getMMDevice(Devices.Keys.XYSTAGE));
+         } catch (Exception ex) {
+            MyDialogUtils.showError("Could not get XY stage position for stage scan initialization");
+            return false;
+         }
       }
       
       cameras_.setSPIMCamerasForAcquisition(true);
@@ -1892,13 +1586,13 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       ImageUtils.setImageStorageClass(TaggedImageStorageMultipageTiff.class);
       
       // Set up controller SPIM parameters (including from Setup panel settings)
-      if (sideActiveA) {
+      if (sideActiveA && !usingDemoCam) {
          boolean success = prepareControllerForAquisition(Devices.Sides.A, hardwareTimepoints);
          if (! success) {
             return false;
          }
       }
-      if (sideActiveB) {
+      if (sideActiveB && !usingDemoCam) {
          boolean success = prepareControllerForAquisition(Devices.Sides.B, hardwareTimepoints);
          if (! success) {
             return false;
@@ -1950,6 +1644,9 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                core_.setExposure(secondCamera, exposureTime);
             }
             
+            // Use this to build metadata for MVR plugin
+            String viewString = "";
+            final String SEPARATOR = "_";
             // set up channels (side A/B is treated as channel too)
             if (useChannels) {
                ChannelSpec[] channels = multiChannelPanel_.getUsedChannels();
@@ -1962,19 +1659,25 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                   }
                   gui_.setChannelName(acqName, channelIndex, firstCamera + chName);
                   gui_.setChannelColor(acqName, channelIndex, getChannelColor(channelIndex));
+                  viewString += NumberUtils.intToDisplayString(0) + SEPARATOR;
                   if (twoSided) {
                      gui_.setChannelName(acqName, channelIndex + 1, secondCamera + chName);
                      gui_.setChannelColor(acqName, channelIndex + 1, getChannelColor(channelIndex + 1));
+                     viewString += NumberUtils.intToDisplayString(90) + SEPARATOR;
                   }
                }
             } else {
                gui_.setChannelName(acqName, 0, firstCamera);
                gui_.setChannelColor(acqName, 0, getChannelColor(0));
+               viewString += NumberUtils.intToDisplayString(0) + SEPARATOR;
                if (twoSided) {
                   gui_.setChannelName(acqName, 1, secondCamera);
                   gui_.setChannelColor(acqName, 1, getChannelColor(1));
+                  viewString += NumberUtils.intToDisplayString(90) + SEPARATOR;
                }
             }
+            // strip last separators:
+            viewString = viewString.substring(0, viewString.length() - 1);
             
             // initialize acquisition
             gui_.initializeAcquisition(acqName, (int) core_.getImageWidth(),
@@ -2003,7 +1706,11 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             gui_.setAcquisitionProperty(acqName, "PixelType", "GRAY16");
             gui_.setAcquisitionProperty(acqName, "z-step_um",  
                   NumberUtils.doubleToDisplayString(getStepSizeUm()) );
-            
+            // Properties for use by MultiViewRegistration plugin
+            // Format is: x_y_z, set to 1 if we should rotate around this axis.
+            gui_.setAcquisitionProperty(acqName, "MVRotationAxis", "0_1_0");
+            gui_.setAcquisitionProperty(acqName, "MVRotations", viewString);
+                      
             // get circular buffer ready
             // do once here but not per-acquisition; need to ensure ROI changes registered
             core_.initializeCircularBuffer();
@@ -2058,19 +1765,19 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                   // loop over all the times we trigger the controller
                   for (int channelNum = 0; channelNum < nrChannelsSoftware; channelNum++) {
 
+                     // deal with shutter before starting acquisition
+                     shutterOpen = core_.getShutterOpen();
+                     if (autoShutter) {
+                        core_.setAutoShutter(false);
+                        if (!shutterOpen) {
+                           core_.setShutterOpen(true);
+                        }
+                     }
+                     
                      // start the cameras
                      core_.startSequenceAcquisition(firstCamera, nrSlicesSoftware, 0, true);
                      if (twoSided) {
                         core_.startSequenceAcquisition(secondCamera, nrSlicesSoftware, 0, true);
-                     }
-
-                     // deal with shutter
-                     if (autoShutter) {
-                        core_.setAutoShutter(false);
-                        shutterOpen = core_.getShutterOpen();
-                        if (!shutterOpen) {
-                           core_.setShutterOpen(true);
-                        }
                      }
 
                      // deal with channel if needed (hardware channel switching doesn't happen here)
@@ -2079,9 +1786,13 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                      }
 
                      // trigger the state machine on the controller
-                     boolean success = triggerControllerStartAcquisition(spimMode); 
-                     if (!success) {
-                        return false;
+                     if (!usingDemoCam) {
+                         boolean success = 
+                                controller_.triggerControllerStartAcquisition(
+                                        spimMode, firstSideA);
+                        if (!success) {
+                           return false;
+                        }
                      }
 
                      ReportingUtils.logDebugMessage("Starting time point " + (timePoint+1) + " of " + nrFrames
@@ -2215,12 +1926,9 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                if (twoSided && core_.isSequenceRunning(secondCamera)) {
                   core_.stopSequenceAcquisition(secondCamera);
                }
-               if (autoShutter) {
-                  core_.setAutoShutter(true);
-                  if (shutterOpen) {
-                     core_.setShutterOpen(false);
-                  }
-               }
+
+               core_.setShutterOpen(shutterOpen);
+               core_.setAutoShutter(autoShutter);
                
                bq.put(TaggedImageQueue.POISON);
                // TODO: evaluate closeAcquisition call
@@ -2268,11 +1976,21 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             Properties.Values.PLOGIC_PRESET_2, true);
 
       // move piezos back to center (neutral) position
+      // TODO move to center position instead of to 0
       if (devices_.isValidMMDevice(Devices.Keys.PIEZOA)) {
          positions_.setPosition(Devices.Keys.PIEZOA, Joystick.Directions.NONE, 0.0);
       }
       if (devices_.isValidMMDevice(Devices.Keys.PIEZOB)) {
          positions_.setPosition(Devices.Keys.PIEZOB, Joystick.Directions.NONE, 0.0);
+      }
+      
+      if ( isStageScanning() ) {
+         try {
+            core_.setXYPosition(devices_.getMMDevice(Devices.Keys.XYSTAGE), xyPosUm.x, xyPosUm.y);
+         } catch (Exception ex) {
+            MyDialogUtils.showError("Could not get XY stage position for stage scan initialization");
+            return false;
+         }
       }
       
       // make sure to stop the SPIM state machine in case the acquisition was cancelled

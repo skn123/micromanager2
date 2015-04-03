@@ -43,6 +43,9 @@ import javax.swing.event.ChangeListener;
 import org.micromanager.api.MMListenerInterface;
 import org.micromanager.api.ScriptInterface;
 import org.micromanager.MMStudio;
+import org.micromanager.asidispim.Utils.AutofocusUtils;
+import org.micromanager.asidispim.Utils.ControllerUtils;
+import static org.micromanager.asidispim.Utils.MyJavaUtils.isMac;
 import org.micromanager.asidispim.Utils.StagePositionUpdater;
 import org.micromanager.internalinterfaces.LiveModeListener; 
 import org.micromanager.utils.MMFrame;
@@ -86,6 +89,8 @@ public class ASIdiSPIMFrame extends MMFrame
    private final Joystick joystick_;
    private final Positions positions_;
    private final Cameras cameras_;
+   private final ControllerUtils controller_;
+   private final AutofocusUtils autofocus_;
    
    private final DevicesPanel devicesPanel_;
    private final AcquisitionPanel acquisitionPanel_;
@@ -94,6 +99,7 @@ public class ASIdiSPIMFrame extends MMFrame
    private final NavigationPanel navigationPanel_;
    private final SettingsPanel settingsPanel_;
    private final DataAnalysisPanel dataAnalysisPanel_;
+   private final AutofocusPanel autofocusPanel_;
    private final HelpPanel helpPanel_;
    private final StatusSubPanel statusSubPanel_;
    private final StagePositionUpdater stagePosUpdater_;
@@ -114,20 +120,29 @@ public class ASIdiSPIMFrame extends MMFrame
       positions_ = new Positions(gui, devices_);
       joystick_ = new Joystick(devices_, props_);
       cameras_ = new Cameras(gui, devices_, props_, prefs_);
+      controller_ = new ControllerUtils(gui, props_, prefs_, devices_);
       
       // create the panels themselves
       // in some cases dependencies create required ordering
       devicesPanel_ = new DevicesPanel(gui, devices_, props_);
       stagePosUpdater_ = new StagePositionUpdater(positions_, props_);  // needed for setup and navigation
+      
+      autofocus_ = new AutofocusUtils(gui, devices_, props_, prefs_,
+            cameras_, stagePosUpdater_, positions_, controller_);
+      
+      acquisitionPanel_ = new AcquisitionPanel(gui, devices_, props_, joystick_, 
+            cameras_, prefs_, stagePosUpdater_, positions_, controller_, autofocus_);
       setupPanelA_ = new SetupPanel(gui, devices_, props_, joystick_, 
-            Devices.Sides.A, positions_, cameras_, prefs_, stagePosUpdater_);
+            Devices.Sides.A, positions_, cameras_, prefs_, stagePosUpdater_,
+            autofocus_);
       setupPanelB_ = new SetupPanel(gui, devices_, props_, joystick_,
-            Devices.Sides.B, positions_, cameras_, prefs_, stagePosUpdater_);
+            Devices.Sides.B, positions_, cameras_, prefs_, stagePosUpdater_,
+            autofocus_);
       navigationPanel_ = new NavigationPanel(gui, devices_, props_, joystick_,
             positions_, prefs_, cameras_, stagePosUpdater_);
-      acquisitionPanel_ = new AcquisitionPanel(gui, devices_, props_, joystick_, 
-            cameras_, prefs_, stagePosUpdater_, positions_);
+
       dataAnalysisPanel_ = new DataAnalysisPanel(gui, prefs_);
+      autofocusPanel_ = new AutofocusPanel(devices_, props_, prefs_, autofocus_);
       settingsPanel_ = new SettingsPanel(devices_, props_, prefs_, stagePosUpdater_);
       stagePosUpdater_.oneTimeUpdate();  // needed for NavigationPanel
       helpPanel_ = new HelpPanel();
@@ -137,7 +152,11 @@ public class ASIdiSPIMFrame extends MMFrame
       // all added tabs must be of type ListeningJPanel
       // only use addLTab, not addTab to guarantee this
       tabbedPane_ = new ListeningJTabbedPane();
-      tabbedPane_.setTabPlacement(JTabbedPane.LEFT);
+      if (isMac()) {
+         tabbedPane_.setTabPlacement(JTabbedPane.TOP);
+      } else {
+         tabbedPane_.setTabPlacement(JTabbedPane.LEFT);
+      }
       tabbedPane_.addLTab(navigationPanel_);  // tabIndex = 0
       tabbedPane_.addLTab(setupPanelA_);      // tabIndex = 1
       tabbedPane_.addLTab(setupPanelB_);      // tabIndex = 2
@@ -145,8 +164,9 @@ public class ASIdiSPIMFrame extends MMFrame
       tabbedPane_.addLTab(dataAnalysisPanel_);// tabIndex = 4
       tabbedPane_.addLTab(devicesPanel_);     // tabIndex = 5
       final int deviceTabIndex = tabbedPane_.getTabCount() - 1;
-      tabbedPane_.addLTab(settingsPanel_);    // tabIndex = 6
-      tabbedPane_.addLTab(helpPanel_);        // tabIndex = 7
+      tabbedPane_.addLTab(autofocusPanel_);   // tabIndex = 6
+      tabbedPane_.addLTab(settingsPanel_);    // tabIndex = 7
+      tabbedPane_.addLTab(helpPanel_);        // tabIndex = 8
       final int helpTabIndex = tabbedPane_.getTabCount() - 1;
       
 

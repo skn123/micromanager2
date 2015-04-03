@@ -103,9 +103,7 @@ public class Devices {
    public final static Set<Devices.Keys> CAMERAS = EnumSet.of(
          Devices.Keys.CAMERAA, Devices.Keys.CAMERAB, Devices.Keys.MULTICAMERA,
          Devices.Keys.CAMERALOWER);
-//   public final static Set<Devices.Keys> SOURCES = EnumSet.of(
-//         Devices.Keys.SOURCE_SPIM, Devices.Keys.SOURCE_LOWER
-//         );
+
 
    public static enum Libraries {
       NODEVICE("NoDevice"), // if the device doesn't exist in Micro-manager
@@ -116,7 +114,7 @@ public class Devices {
       ANDORCAM("AndorSDK3"),
       DEMOCAM("DemoCamera"),
       UTILITIES("Utilities"),
-      UNKNOWN("Unknown"), // if the device is valid but not one we know about
+      UNKNOWN("Unknown") // if the device is valid but not one we know about
       ;
       private final String text;
 
@@ -478,8 +476,8 @@ public class Devices {
       case GALVOA:
       case GALVOB:
          switch (dir) {
-         case X: ret += ", sheet (X)"; break;
-         case Y: ret += ", slice (Y)"; break;
+         case X: ret += ", sheet"; break;
+         case Y: ret += ", slice"; break;
          default: break;
          }
          break;
@@ -498,6 +496,7 @@ public class Devices {
    /**
     * Returns verbose description, including axis role (but not axis letter)
     * @param key
+    * @param dir
     * @return
     */
    public String getDeviceDisplayVerbose(Devices.Keys key, Joystick.Directions dir) {
@@ -507,6 +506,10 @@ public class Devices {
    /**
     * returns device description with role for the particular side (used for joystick labels)
     * camera labels use a different mechanicsm, ideally would merge the two
+    * @param key
+    * @param dir
+    * @param side
+    * @return 
     */
    public String getDeviceDisplayWithRole(Devices.Keys key, Joystick.Directions dir, Devices.Sides side) {
       String ret;
@@ -569,6 +572,7 @@ public class Devices {
     * device.
     * 
     * @param key
+    * @param dir
     * @return
     */
    public String getDeviceDisplayWithAxisLetter1D(Devices.Keys key,
@@ -676,10 +680,10 @@ public class Devices {
       case XYSTAGE:
          return new DeviceData(key, "XY Stage", Sides.NONE, true);
       case LOWERZDRIVE:
-         return new DeviceData(key, "Lower Z Drive", Sides.NONE,
+         return new DeviceData(key, "Lower Z Height", Sides.NONE,
                true);
       case UPPERZDRIVE:
-         return new DeviceData(key, "Upper (SPIM) Z Drive",
+         return new DeviceData(key, "SPIM Head Height",
                Sides.NONE, true);
          // case ASGALVOA: return new DeviceData(Keys.ASGALVOA,
          // "Anti-striping Micromirror", Sides.A, true);
@@ -762,6 +766,7 @@ public class Devices {
 
    /**
     * Used to add classes implementing DeviceListenerInterface as listeners
+    * @param listener
     */
    public void addListener(DevicesListenerInterface listener) {
       listeners_.add(listener);
@@ -770,6 +775,7 @@ public class Devices {
    /**
     * Enable or disable listeners. When switching from disabled to enabled it
     * will perform callListeners()
+    * @param enabled
     */
    public void enableListeners(boolean enabled) {
       if (enabled && !listenersEnabled_) {
