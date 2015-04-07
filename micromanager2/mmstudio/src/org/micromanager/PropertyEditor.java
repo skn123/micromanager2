@@ -19,7 +19,7 @@
 //               CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //               INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-// CVS:          $Id: PropertyEditor.java 14898 2015-01-08 18:52:48Z cweisiger $
+// CVS:          $Id: PropertyEditor.java 15232 2015-04-02 18:54:07Z cweisiger $
 //
 
 package org.micromanager;
@@ -348,7 +348,11 @@ public class PropertyEditor extends MMFrame {
             propList_.clear();
 
             boolean liveMode = gui_.isLiveModeOn();
-            gui_.enableLiveMode(false);
+            if (!fromCache) {
+               // Some properties may not be readable if we are
+               // mid-acquisition.
+               gui_.enableLiveMode(false);
+            }
             for (int i=0; i<devices.size(); i++) { 
                if (data_.showDevice(flags, devices.get(i))) {
                   StrVector properties = core_.getDevicePropertyNames(devices.get(i));
@@ -365,8 +369,9 @@ public class PropertyEditor extends MMFrame {
 
             updateRowVisibility(flags); 
 
-
-            gui_.enableLiveMode(liveMode);
+            if (!fromCache) {
+               gui_.enableLiveMode(liveMode);
+            }
          } catch (Exception e) {
             handleException(e);
          }
