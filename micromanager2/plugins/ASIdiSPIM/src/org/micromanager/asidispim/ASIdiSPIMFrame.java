@@ -120,7 +120,7 @@ public class ASIdiSPIMFrame extends MMFrame
       positions_ = new Positions(gui, devices_);
       joystick_ = new Joystick(devices_, props_);
       cameras_ = new Cameras(gui, devices_, props_, prefs_);
-      controller_ = new ControllerUtils(gui, props_, prefs_, devices_);
+      controller_ = new ControllerUtils(gui, props_, prefs_, devices_, positions_);
       
       // create the panels themselves
       // in some cases dependencies create required ordering
@@ -142,7 +142,7 @@ public class ASIdiSPIMFrame extends MMFrame
             positions_, prefs_, cameras_, stagePosUpdater_);
 
       dataAnalysisPanel_ = new DataAnalysisPanel(gui, prefs_);
-      autofocusPanel_ = new AutofocusPanel(devices_, props_, prefs_, autofocus_);
+      autofocusPanel_ = new AutofocusPanel(gui, devices_, props_, prefs_, autofocus_);
       settingsPanel_ = new SettingsPanel(devices_, props_, prefs_, stagePosUpdater_);
       stagePosUpdater_.oneTimeUpdate();  // needed for NavigationPanel
       helpPanel_ = new HelpPanel();
@@ -281,6 +281,7 @@ public class ASIdiSPIMFrame extends MMFrame
    public void slmExposureChanged(String cameraName, double newExposureTime) {
    }
    
+   // TODO make this automatically call all panels' method
    private void saveSettings() {
       // save selections as needed
       devices_.saveSettings();
@@ -294,11 +295,18 @@ public class ASIdiSPIMFrame extends MMFrame
       prefs_.putInt(MAIN_PREF_NODE, Prefs.Keys.TAB_INDEX, tabbedPane_.getSelectedIndex());
    }
    
+// TODO make this automatically call all panels' method
+   private void windowClosing() {
+      acquisitionPanel_.windowClosing();
+      setupPanelA_.windowClosing();
+      setupPanelB_.windowClosing();
+   }
+   
    @Override
    public void dispose() {
       stagePosUpdater_.stop();
       saveSettings();
-      acquisitionPanel_.windowClosing();
+      windowClosing();
       super.dispose();
    }
 }

@@ -282,9 +282,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
          public void actionPerformed(ActionEvent e) {
             boolean doMin = minSlicePeriodCB_.isSelected();
             desiredSlicePeriod_.setEnabled(!doMin);
-            if (doMin) {
-               recalculateSliceTiming(false);
-            }
+            recalculateSliceTiming(false);
          }
       });
       volPanel_.add(minSlicePeriodCB_, "span 2, wrap");
@@ -840,14 +838,15 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
    }
    
    private boolean isMultichannel() {
-      return multiChannelPanel_.isPanelEnabled();
+      return multiChannelPanel_.isPanelEnabled() && multiChannelPanel_.getUsedChannels().length > 1;
    }
    
    private int getNumChannels() {
-      if (!isMultichannel()) {
+      if (multiChannelPanel_.isPanelEnabled()) {
+         return multiChannelPanel_.getUsedChannels().length;
+      } else {
          return 1;
       }
-      return multiChannelPanel_.getUsedChannels().length;
    }
    
    private boolean isStageScanning() {
@@ -868,7 +867,6 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
          return MultichannelModes.Keys.NONE;
       }
    }
-     
    
    private int getLineScanPeriod() {
       return (Integer) lineScanPeriod_.getValue();
@@ -1054,6 +1052,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
    
    /**
     * Compute the volume duration in ms based on controller's timing settings.
+    * Includes time for multiple channels.
     * @return duration in ms
     */
    private double computeActualVolumeDuration() {
@@ -1069,8 +1068,16 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             return getNumSides() * getNumChannels()
                     * (rampDuration * 2 + stackDuration);
          default: // piezo scan
+            double channelSwitchDelay = 0;
+            if (isMultichannel()) {
+               if (getChannelMode().equals(MultichannelModes.Keys.VOLUME)) {
+                  channelSwitchDelay = 500;   // estimate channel switching overhead time as 0.5s
+                                              // actual value will be hardware-dependent
+               }
+            }
             return getNumSides() * getNumChannels()
-                    * (getDelayBeforeSide() + stackDuration);
+                    * (getDelayBeforeSide() + stackDuration)
+                    + (getNumChannels() - 1) * channelSwitchDelay;
       }
    }
    
@@ -1282,6 +1289,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
               getFirstSide(),
               useTimepointsCB_.isSelected(),
               getAcquisitionMode(),
+              false,
               getDelayBeforeSide(),
               getStepSizeUm(),
               sliceTiming_
@@ -1307,7 +1315,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
 
          @Override
          public void run() {
-            ReportingUtils.logMessage("User requested start of diSPIM acquisition.");
+            ReportingUtils.logDebugMessage("User requested start of diSPIM acquisition.");
             cancelAcquisition_.set(false);
             acquisitionRunning_.set(true);
             updateStartButton();
@@ -1586,23 +1594,20 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       ImageUtils.setImageStorageClass(TaggedImageStorageMultipageTiff.class);
       
       // Set up controller SPIM parameters (including from Setup panel settings)
-      if (sideActiveA && !usingDemoCam) {
+      // want to do this, even with demo cameras, so we can test everything else
+      if (sideActiveA) {
          boolean success = prepareControllerForAquisition(Devices.Sides.A, hardwareTimepoints);
          if (! success) {
             return false;
          }
       }
-      if (sideActiveB && !usingDemoCam) {
+      if (sideActiveB) {
          boolean success = prepareControllerForAquisition(Devices.Sides.B, hardwareTimepoints);
          if (! success) {
             return false;
          }
       }
       
-      // sets PLogic BNC3 output high to indicate acquisition is going on
-      props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET, 
-            Properties.Values.PLOGIC_PRESET_3, true);
-
       boolean nonfatalError = false;
       long acqButtonStart = System.currentTimeMillis();
 
@@ -1633,12 +1638,6 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                   nrSlices, nrPositions, show, save);
             }
             
-            // because demo camera sends images without waiting for controller
-            // set exposure time to be slice duration (or x2 for 2-sided)
-            // so the sequence acquisition takes about the right amount of time
-            if (usingDemoCam) {
-               exposureTime = sliceDuration * nrSides;
-            }
             core_.setExposure(firstCamera, exposureTime);
             if (twoSided) {
                core_.setExposure(secondCamera, exposureTime);
@@ -1732,7 +1731,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             // For hardware-timed timepoints then we only trigger the controller once
             long acqStart = System.currentTimeMillis();
             for (int timePoint = 0; timePoint < nrFrames; timePoint++) {
-
+               
                // handle intervals between (software-timed) time points
                long acqNow = System.currentTimeMillis();
                long delay = acqStart + timePoint * timepointsIntervalMs - acqNow;
@@ -1764,144 +1763,158 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
 
                   // loop over all the times we trigger the controller
                   for (int channelNum = 0; channelNum < nrChannelsSoftware; channelNum++) {
-
-                     // deal with shutter before starting acquisition
-                     shutterOpen = core_.getShutterOpen();
-                     if (autoShutter) {
-                        core_.setAutoShutter(false);
-                        if (!shutterOpen) {
-                           core_.setShutterOpen(true);
+                     try {
+                        // deal with shutter before starting acquisition
+                        shutterOpen = core_.getShutterOpen();
+                        if (autoShutter) {
+                           core_.setAutoShutter(false);
+                           if (!shutterOpen) {
+                              core_.setShutterOpen(true);
+                           }
                         }
-                     }
-                     
-                     // start the cameras
-                     core_.startSequenceAcquisition(firstCamera, nrSlicesSoftware, 0, true);
-                     if (twoSided) {
-                        core_.startSequenceAcquisition(secondCamera, nrSlicesSoftware, 0, true);
-                     }
 
-                     // deal with channel if needed (hardware channel switching doesn't happen here)
-                     if (changeChannelPerVolumeSoftware) {
-                        multiChannelPanel_.selectNextChannel();
-                     }
+                        // start the cameras
+                        core_.startSequenceAcquisition(firstCamera, nrSlicesSoftware, 0, true);
+                        if (twoSided) {
+                           core_.startSequenceAcquisition(secondCamera, nrSlicesSoftware, 0, true);
+                        }
 
-                     // trigger the state machine on the controller
-                     if (!usingDemoCam) {
-                         boolean success = 
-                                controller_.triggerControllerStartAcquisition(
-                                        spimMode, firstSideA);
+                        // deal with channel if needed (hardware channel switching doesn't happen here)
+                        if (changeChannelPerVolumeSoftware) {
+                           multiChannelPanel_.selectNextChannel();
+                        }
+
+                        // trigger the state machine on the controller
+                        // do this even with demo cameras to test everything else
+                        boolean success = 
+                              controller_.triggerControllerStartAcquisition(
+                                    spimMode, firstSideA);
                         if (!success) {
                            return false;
                         }
-                     }
 
-                     ReportingUtils.logDebugMessage("Starting time point " + (timePoint+1) + " of " + nrFrames
-                           + " with channel number " + channelNum);
+                        ReportingUtils.logDebugMessage("Starting time point " + (timePoint+1) + " of " + nrFrames
+                              + " with (software) channel number " + channelNum);
 
-                     // Wait for first image to create ImageWindow, so that we can be sure about image size
-                     // Do not actually grab first image here, just make sure it is there
-                     long start = System.currentTimeMillis();
-                     long now = start;
-                     long timeout;  // wait 5 seconds for first image to come
-                     timeout = Math.max(5000, Math.round(1.2*computeActualVolumeDuration()));
-                     while (core_.getRemainingImageCount() == 0 && (now - start < timeout)
-                           && !cancelAcquisition_.get()) {
-                        now = System.currentTimeMillis();
-                        Thread.sleep(5);
-                     }
-                     if (now - start >= timeout) {
-                        throw new Exception("Camera did not send first image within a reasonable time");
-                     }
-
-                     // grab all the images from the cameras, put them into the acquisition
-                     int[] frNumber = new int[nrChannels*2];  // keep track of how many frames we have received for each "channel" (MM channel is our channel * 2 for the 2 cameras)
-                     int[] cameraFrNumber = new int[2];     // keep track of how many frames we have received from the camera
-                     boolean done = false;
-                     long timeout2;  // how long to wait between images before timing out
-                     timeout2 = Math.max(2000, Math.round(5*sliceDuration));
-                     start = System.currentTimeMillis();
-                     long last = start;
-                     try {
-                        while ((core_.getRemainingImageCount() > 0
-                              || core_.isSequenceRunning(firstCamera)
-                              || (twoSided && core_.isSequenceRunning(secondCamera)))
-                              && !done) {
+                        // Wait for first image to create ImageWindow, so that we can be sure about image size
+                        // Do not actually grab first image here, just make sure it is there
+                        long start = System.currentTimeMillis();
+                        long now = start;
+                        long timeout;  // wait 5 seconds for first image to come
+                        timeout = Math.max(5000, Math.round(1.2*computeActualVolumeDuration()));
+                        while (core_.getRemainingImageCount() == 0 && (now - start < timeout)
+                              && !cancelAcquisition_.get()) {
                            now = System.currentTimeMillis();
-                           if (core_.getRemainingImageCount() > 0) {  // we have an image to grab
-                              TaggedImage timg = core_.popNextTaggedImage();
-                              String camera = (String) timg.tags.get("Camera");
-                              
-                              // figure out which channel index the acquisition is using
-                              int cameraIndex = camera.equals(firstCamera) ? 0: 1;
-                              int channelIndex;
-                              switch (channelMode) {
-                              case NONE:
-                              case VOLUME:
-                                 channelIndex = channelNum;
-                                 break;
-                              case VOLUME_HW:
-                                 channelIndex = cameraFrNumber[cameraIndex] / nrSlices;  // want quotient only
-                                 break;
-                              case SLICE_HW:
-                                 channelIndex = cameraFrNumber[cameraIndex] % nrChannels;  // want modulo arithmetic
-                                 break;
-                              default:
-                                 // should never get here
-                                 throw new Exception("Undefined channel mode");
-                              }
-                              
-                              // 2nd camera always gets odd channel index 
-                              // second side always comes after first side
-                              if (twoSided) {
-                                 channelIndex *= 2;
-                              }
-                              channelIndex += cameraIndex;
-                              
-                              // add image to acquisition
-                              if (spimMode == AcquisitionModes.Keys.NO_SCAN && ! singleTimePointViewers) {
-                                 // create time series for no scan
-                                 addImageToAcquisition(acqName,
-                                         frNumber[channelIndex], channelIndex, timePoint, 
-                                         positionNum, now - acqStart, timg, bq);
-                              } else { // standard, create Z-stacks
-                                 addImageToAcquisition(acqName, timePoint, channelIndex,
-                                       frNumber[channelIndex], positionNum,
-                                       now - acqStart, timg, bq);
-                              }
-                              
-                              // update our counters
-                              frNumber[channelIndex]++;
-                              cameraFrNumber[cameraIndex]++;
-                              last = now;  // keep track of last image timestamp
-                              
-                           } else {  // no image ready yet
-                              done = cancelAcquisition_.get();
-                              Thread.sleep(1);
-                              if (now - last >= timeout2) {
-                                 ReportingUtils.logError("Camera did not send all expected images within" +
-                                       " a reasonable period for timepoint " + (timePoint+1) + ".  Continuing anyway.");
-                                 // allow other time points to continue by stopping acquisition manually
-                                 // (in normal case the sequence acquisition stops itself after
-                                 // all the expected images are returned)
-                                 if (core_.isSequenceRunning(firstCamera)) {
-                                    core_.stopSequenceAcquisition(firstCamera);
+                           Thread.sleep(5);
+                        }
+                        if (now - start >= timeout) {
+                           throw new Exception("Camera did not send first image within a reasonable time");
+                        }
+
+                        // grab all the images from the cameras, put them into the acquisition
+                        int[] frNumber = new int[nrChannels*2];  // keep track of how many frames we have received for each "channel" (MM channel is our channel * 2 for the 2 cameras)
+                        int[] cameraFrNumber = new int[2];     // keep track of how many frames we have received from the camera
+                        boolean done = false;
+                        long timeout2;  // how long to wait between images before timing out
+                        timeout2 = Math.max(2000, Math.round(5*sliceDuration));
+                        start = System.currentTimeMillis();
+                        long last = start;
+                        try {
+                           while ((core_.getRemainingImageCount() > 0
+                                 || core_.isSequenceRunning(firstCamera)
+                                 || (twoSided && core_.isSequenceRunning(secondCamera)))
+                                 && !done) {
+                              now = System.currentTimeMillis();
+                              if (core_.getRemainingImageCount() > 0) {  // we have an image to grab
+                                 TaggedImage timg = core_.popNextTaggedImage();
+                                 String camera = (String) timg.tags.get("Camera");
+
+                                 // figure out which channel index the acquisition is using
+                                 int cameraIndex = camera.equals(firstCamera) ? 0: 1;
+                                 int channelIndex;
+                                 switch (channelMode) {
+                                 case NONE:
+                                 case VOLUME:
+                                    channelIndex = channelNum;
+                                    break;
+                                 case VOLUME_HW:
+                                    channelIndex = cameraFrNumber[cameraIndex] / nrSlices;  // want quotient only
+                                    break;
+                                 case SLICE_HW:
+                                    channelIndex = cameraFrNumber[cameraIndex] % nrChannels;  // want modulo arithmetic
+                                    break;
+                                 default:
+                                    // should never get here
+                                    throw new Exception("Undefined channel mode");
                                  }
-                                 if (twoSided && core_.isSequenceRunning(secondCamera)) {
-                                    core_.stopSequenceAcquisition(secondCamera);
+
+                                 // 2nd camera always gets odd channel index 
+                                 // second side always comes after first side
+                                 if (twoSided) {
+                                    channelIndex *= 2;
                                  }
-                                 nonfatalError = true;
-                                 done = true;
+                                 channelIndex += cameraIndex;
+
+                                 // add image to acquisition
+                                 if (spimMode == AcquisitionModes.Keys.NO_SCAN && ! singleTimePointViewers) {
+                                    // create time series for no scan
+                                    addImageToAcquisition(acqName,
+                                          frNumber[channelIndex], channelIndex, timePoint, 
+                                          positionNum, now - acqStart, timg, bq);
+                                 } else { // standard, create Z-stacks
+                                    addImageToAcquisition(acqName, timePoint, channelIndex,
+                                          frNumber[channelIndex], positionNum,
+                                          now - acqStart, timg, bq);
+                                 }
+
+                                 // update our counters
+                                 frNumber[channelIndex]++;
+                                 cameraFrNumber[cameraIndex]++;
+                                 last = now;  // keep track of last image timestamp
+
+                              } else {  // no image ready yet
+                                 done = cancelAcquisition_.get();
+                                 Thread.sleep(1);
+                                 if (now - last >= timeout2) {
+                                    ReportingUtils.logError("Camera did not send all expected images within" +
+                                          " a reasonable period for timepoint " + (timePoint+1) + ".  Continuing anyway.");
+                                    nonfatalError = true;
+                                    done = true;
+                                 }
                               }
                            }
+
+                           // update count if we stopped in the middle
+                           if (cancelAcquisition_.get()) {
+                              numTimePointsDone_--;
+                           }
+                           
+                           // if we are using demo camera then add some extra time to let controller finish
+                           // since we got images without waiting for controller to actually send triggers
+                           if (usingDemoCam) {
+                              Thread.sleep(200);  // for serial communication overhead
+                              Thread.sleep((long)volumeDuration/nrChannelsSoftware);  // estimate the time per channel, not ideal in case of software channel switching
+                           }
+
+                        } catch (InterruptedException iex) {
+                           MyDialogUtils.showError(iex);
                         }
-                        
-                        // update count if we stopped in the middle
-                        if (cancelAcquisition_.get()) {
-                           numTimePointsDone_--;
+                     } catch (Exception ex) {
+                        MyDialogUtils.showError(ex);
+                     } finally {
+                        // cleanup at the end of each time we trigger the controller
+
+                        // put shutter back to original state
+                        core_.setShutterOpen(shutterOpen);
+                        core_.setAutoShutter(autoShutter);
+
+                        // make sure cameras aren't running anymore
+                        if (core_.isSequenceRunning(firstCamera)) {
+                           core_.stopSequenceAcquisition(firstCamera);
                         }
-                        
-                     } catch (InterruptedException iex) {
-                        MyDialogUtils.showError(iex);
+                        if (twoSided && core_.isSequenceRunning(secondCamera)) {
+                           core_.stopSequenceAcquisition(secondCamera);
+                        }
                      }
                   }
                }
@@ -1914,22 +1927,6 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             MyDialogUtils.showError(ex);
          } finally {  // end of this acquisition (could be about to restart if separate viewers)
             try {
-               // if we are using demo camera then add some extra time to let controller finish
-               // since it returned images without waiting for controller to start sending triggers
-               if (usingDemoCam) {
-                  Thread.sleep(1000);
-               }
-               
-               if (core_.isSequenceRunning(firstCamera)) {
-                  core_.stopSequenceAcquisition(firstCamera);
-               }
-               if (twoSided && core_.isSequenceRunning(secondCamera)) {
-                  core_.stopSequenceAcquisition(secondCamera);
-               }
-
-               core_.setShutterOpen(shutterOpen);
-               core_.setAutoShutter(autoShutter);
-               
                bq.put(TaggedImageQueue.POISON);
                // TODO: evaluate closeAcquisition call
                // at the moment, the Micro-Manager api has a bug that causes 
@@ -1950,55 +1947,14 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       
       // cleanup after end of all acquisitions
       
+      // TODO be more careful and always do these if we actually started acquisition, even if exception happened
+      
       // reset channel to original if we clobbered it
       if (useChannels) {
          multiChannelPanel_.setConfig(originalChannelConfig);
       }
       
-      // the controller will end with both beams disabled and scan off so reflect
-      // that in device properties
-      props_.setPropValue(Devices.Keys.GALVOA, Properties.Keys.BEAM_ENABLED,
-            Properties.Values.NO, true);
-      props_.setPropValue(Devices.Keys.GALVOB, Properties.Keys.BEAM_ENABLED,
-            Properties.Values.NO, true);
-      props_.setPropValue(Devices.Keys.GALVOA, Properties.Keys.SA_MODE_X,
-            Properties.Values.SAM_DISABLED, true);
-      props_.setPropValue(Devices.Keys.GALVOB, Properties.Keys.SA_MODE_X,
-            Properties.Values.SAM_DISABLED, true);
-      
-      // sets BNC3 output low again
-      // this only happens after images have all been received (or timeout occurred)
-      // but if using DemoCam devices then it happens too early
-      // at least part of the problem is that both DemoCam devices "acquire" at the same time
-      // instead of actually obeying the controller's triggers
-      // as a result with DemoCam the side select (BNC4) isn't correct
-      props_.setPropValue(Devices.Keys.PLOGIC, Properties.Keys.PLOGIC_PRESET, 
-            Properties.Values.PLOGIC_PRESET_2, true);
-
-      // move piezos back to center (neutral) position
-      // TODO move to center position instead of to 0
-      if (devices_.isValidMMDevice(Devices.Keys.PIEZOA)) {
-         positions_.setPosition(Devices.Keys.PIEZOA, Joystick.Directions.NONE, 0.0);
-      }
-      if (devices_.isValidMMDevice(Devices.Keys.PIEZOB)) {
-         positions_.setPosition(Devices.Keys.PIEZOB, Joystick.Directions.NONE, 0.0);
-      }
-      
-      if ( isStageScanning() ) {
-         try {
-            core_.setXYPosition(devices_.getMMDevice(Devices.Keys.XYSTAGE), xyPosUm.x, xyPosUm.y);
-         } catch (Exception ex) {
-            MyDialogUtils.showError("Could not get XY stage position for stage scan initialization");
-            return false;
-         }
-      }
-      
-      // make sure to stop the SPIM state machine in case the acquisition was cancelled
-      // even if the acquisition wasn't cancelled make sure the Micro-Manager properties are updated
-      props_.setPropValue(Devices.Keys.GALVOA, Properties.Keys.SPIM_STATE,
-            Properties.Values.SPIM_IDLE, true);
-      props_.setPropValue(Devices.Keys.GALVOB, Properties.Keys.SPIM_STATE,
-            Properties.Values.SPIM_IDLE, true);
+      controller_.cleanUpAfterAcquisition(isStageScanning(), xyPosUm, 0.0f, 0.0f);
          
       updateAcquisitionStatus(AcquisitionStatus.DONE);
       posUpdater_.pauseUpdates(false);
@@ -2069,6 +2025,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
    /**
     * Gets called when enclosing window closes
     */
+   @Override
    public void windowClosing() {
       sliceFrameAdvanced_.savePosition();
       sliceFrameAdvanced_.dispose();

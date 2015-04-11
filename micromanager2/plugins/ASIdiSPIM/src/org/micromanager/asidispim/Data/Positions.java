@@ -27,6 +27,7 @@ import java.util.HashMap;
 import mmcorej.CMMCore;
 
 import org.micromanager.api.ScriptInterface;
+import org.micromanager.asidispim.Data.Joystick.Directions;
 import org.micromanager.asidispim.Utils.MyDialogUtils;
 import org.micromanager.utils.NumberUtils;
 import org.micromanager.utils.ReportingUtils;
@@ -88,7 +89,7 @@ public class Positions {
     * @param dir
     * @return
     */
-   public double getPosition(Devices.Keys devKey, Joystick.Directions dir) {
+   public double getCachedPosition(Devices.Keys devKey, Joystick.Directions dir) {
       if (devices_.is1DStage(devKey)) {
          Double pos = getOneAxisStagePosition(devKey);
          if (pos != null) {
@@ -106,6 +107,16 @@ public class Positions {
          }
       }
       return 0;
+   }
+   
+   /**
+    * Returns the current position of the specified stage, or 0 if the stage wasn't found.
+    * Updates the cache with the value as well.
+    * @param devKey
+    * @return
+    */
+   public double getUpdatedPosition(Devices.Keys devKey) {
+      return getUpdatedPosition(devKey, Joystick.Directions.NONE);
    }
    
    /**
@@ -196,11 +207,45 @@ public class Positions {
    /**
     * Sets the position of specified stage to the specified value using appropriate core calls
     * @param devKey
+    * @param pos new position of the stage
+    */
+   public boolean setPosition(Devices.Keys devKey, double pos) {
+      return setPosition(devKey, Directions.NONE, pos, false);
+   }
+   
+   /**
+    * Sets the position of specified stage to the specified value using appropriate core calls
+    * @param devKey
+    * @param dir
+    * @param pos new position of the stage
+    * @param ignoreErrors true will return without any errors (or any action) if device is missing
+    */
+   public boolean setPosition(Devices.Keys devKey, double pos, boolean ignoreErrors) {
+      return setPosition(devKey, Directions.NONE, pos, false);
+   }
+   
+   /**
+    * Sets the position of specified stage to the specified value using appropriate core calls
+    * @param devKey
     * @param dir
     * @param pos new position of the stage
     */
-   public void setPosition(Devices.Keys devKey, Joystick.Directions dir, double pos) {
+   public boolean setPosition(Devices.Keys devKey, Joystick.Directions dir, double pos) {
+      return setPosition(devKey, dir, pos, false);
+   }
+   
+   /**
+    * Sets the position of specified stage to the specified value using appropriate core calls
+    * @param devKey
+    * @param dir
+    * @param pos new position of the stage
+    * @param ignoreErrors true will return without any errors (or any action) if device is missing
+    */
+   public boolean setPosition(Devices.Keys devKey, Joystick.Directions dir, double pos, boolean ignoreErrors) {
       try {
+         if (ignoreErrors && !devices_.isValidMMDevice(devKey)) {
+            return false;
+         }
          String mmDevice = devices_.getMMDeviceException(devKey);
          if (devices_.is1DStage(devKey)) {
             core_.setPosition(mmDevice, pos);
@@ -222,8 +267,10 @@ public class Positions {
                core_.setGalvoPosition(mmDevice, pos2D.x, pos);
             }
          }
+         return true;
       } catch (Exception ex) {
          MyDialogUtils.showError(ex);
+         return false;
       }
    }
    
