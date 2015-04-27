@@ -291,7 +291,7 @@ const char* const g_ScanFastAxisStopPositionPropertyName = "ScanFastAxisStopPosi
 const char* const g_ScanSlowAxisStartPositionPropertyName = "ScanSlowAxisStartPosition(mm)";
 const char* const g_ScanSlowAxisStopPositionPropertyName = "ScanSlowAxisStopPosition(mm)";
 const char* const g_ScanNumLinesPropertyName = "ScanNumLines";
-const char* const g_ScanOvershootFactorPropertyName = "ScanOvershootFactor";
+const char* const g_ScanSettlingTimePropertyName = "ScanSettlingTime(ms)";
 
 // CRISP property names
 const char* const g_CRISPWaitAfterLockPropertyName = "Wait ms after Lock";
@@ -416,6 +416,8 @@ const char* const g_PresetCode20 = "20 - cells 13-16 on BNC5-8";
 const char* const g_PresetCode21 = "21 - mod2 counter";
 const char* const g_PresetCode22 = "22 - no counter";
 const char* const g_PresetCode23 = "23 - TTL0-7 on BNC1-8";
+const char* const g_PresetCode24 = "24 - BNC3 source = cell 1";
+const char* const g_PresetCode25 = "25 - BNC3 source = cell 8";
 const char* const g_PLogicModeNone = "None";
 const char* const g_PLogicModediSPIMShutter = "diSPIM Shutter";
 const char* const g_ChannelNone = "none of outputs 5-8";
