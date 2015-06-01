@@ -44,8 +44,10 @@ public:
    // -----------
    int SetPosition(double x, double y);
    int GetPosition(double& x, double& y);
-   double GetXRange() { return limitX_; }  // this is only positive limit, on power-up limits are +/- this value
-   double GetYRange() { return limitY_; }  // this is only positive limit, on power-up limits are +/- this value
+   double GetXRange() { return (upperLimitX_ - lowerLimitX_); }  // this is only positive limit, on power-up limits are +/- this value
+   double GetYRange() { return (upperLimitY_ - lowerLimitY_); }  // this is only positive limit, on power-up limits are +/- this value
+   double GetXMinimum() { return lowerLimitX_; }
+   double GetYMinimum() { return lowerLimitY_; }
    int AddPolygonVertex(int polygonIndex, double x, double y);
    int DeletePolygons();
    int LoadPolygons();
@@ -55,7 +57,7 @@ public:
    int StopSequence() { return DEVICE_UNSUPPORTED_COMMAND; }  // doesn't appear to be used in MMCore.cpp anyway
 
    // below aren't really implemented but we do the closest thing we can with our hardware
-   int PointAndFire(double x, double y, double /*time_us*/) { return SetPosition(x, y); }  // we can't control beam time but go to location
+   int PointAndFire(double x, double y, double time_us);
    int SetSpotInterval(double /*pulseInterval_us*/) { return DEVICE_OK; }  // we can't actual control beam time so just ignore
    int SetIlluminationState(bool on);  // we can't turn off beam but we can steer beam to corner where hopefully it is blocked internally
    int GetChannel(char* channelName);
@@ -118,6 +120,7 @@ public:
    int OnSPIMFirstSide        (MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSPIMScannerHomeEnable(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSPIMPiezoHomeEnable  (MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnSPIMInterleaveSidesEnable(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSPIMModeByte         (MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSPIMNumRepeats       (MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSPIMState            (MM::PropertyBase* pProp, MM::ActionType eAct);
@@ -142,12 +145,14 @@ private:
    string axisLetterY_;
    double unitMultX_;  // units per degree
    double unitMultY_;  // units per degree
-   double limitX_;   // positive limit only (on power-up things are symmetric about 0)
-   double limitY_;   // positive limit only (on power-up things are symmetric about 0)
-   double shutterX_; // home position, used to turn beam off
-   double shutterY_;  // home position, used to turn beam off
-   double lastX_;   // used to cache position
-   double lastY_;   // used to cache position
+   double upperLimitX_;   // positive limit only (on power-up things are symmetric about 0)
+   double upperLimitY_;   // positive limit only (on power-up things are symmetric about 0)
+   double lowerLimitX_;   // negative limit (on power-up things are symmetric about 0)
+   double lowerLimitY_;   // negative limit (on power-up things are symmetric about 0)
+   double shutterX_; // home position, used to turn beam off (in degrees)
+   double shutterY_; // home position, used to turn beam off (in degrees)
+   double lastX_;    // used to cache position (in degrees)
+   double lastY_;    // used to cache position (in degrees)
    bool illuminationState_;  // true if on, false if beam is turned off
    bool refreshOverride_;  // true temporarily if refreshing property
 

@@ -18,7 +18,7 @@
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-// CVS:           $Id: MMDeviceConstants.h 13599 2014-06-04 16:24:20Z cweisiger $
+// CVS:           $Id: MMDeviceConstants.h 15440 2015-05-15 23:44:30Z mark $
 //
 
 #ifndef _MMDEVICE_CONSTANTS_H_
@@ -163,6 +163,7 @@ namespace MM {
    const char* const g_CFGCommand_ConfigPixelSize = "ConfigPixelSize";
    const char* const g_CFGCommand_PixelSize_um = "PixelSize_um";
    const char* const g_CFGCommand_ParentID = "Parent";
+   const char* const g_CFGCommand_FocusDirection = "FocusDirection";
 
    // configuration groups
    const char* const g_CFGGroup_System = "System";
@@ -238,6 +239,12 @@ namespace MM {
       SerialPort,
       USBPort,
       HIDPort
+   };
+
+   enum FocusDirection {
+      FocusDirectionUnknown,
+      FocusDirectionTowardSample,
+      FocusDirectionAwayFromSample,
    };
 
    //////////////////////////////////////////////////////////////////////////////

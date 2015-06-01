@@ -139,19 +139,19 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       micromirrorDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.GALVOA, side);
 
       sheetStartPositionLabel_ = new StoredFloatLabel(panelName_, 
-              Properties.Keys.PLUGIN_SHEET_START_POS.toString(), -1,
+              Properties.Keys.PLUGIN_SHEET_START_POS.toString(), -0.5f,
               prefs_, " \u00B0");
       sliceStartPos_ = sheetStartPositionLabel_.getFloat();
       sheetStopPositionLabel_ = new StoredFloatLabel(panelName_, 
-              Properties.Keys.PLUGIN_SHEET_END_POS.toString(), 1,
+              Properties.Keys.PLUGIN_SHEET_END_POS.toString(), 0.5f,
               prefs_, " \u00B0");
       sliceStopPos_ = sheetStopPositionLabel_.getFloat();
       imagingPiezoStartPositionLabel_ = new StoredFloatLabel(panelName_, 
-              Properties.Keys.PLUGIN_PIEZO_START_POS.toString(), -80,
+              Properties.Keys.PLUGIN_PIEZO_START_POS.toString(), -50f,
               prefs_, " \u00B5" + "m");
       imagingPiezoStartPos_ = imagingPiezoStartPositionLabel_.getFloat();
       imagingPiezoStopPositionLabel_ = new StoredFloatLabel(panelName_, 
-              Properties.Keys.PLUGIN_PIEZO_END_POS.toString(), 80,
+              Properties.Keys.PLUGIN_PIEZO_END_POS.toString(), 50f,
               prefs_, " \u00B5" + "m");
       imagingPiezoStopPos_ = imagingPiezoStopPositionLabel_.getFloat();
       
@@ -165,9 +165,9 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       offsetField_ = pu.makeFloatEntryField(panelName_, 
             Properties.Keys.PLUGIN_OFFSET_PIEZO_SHEET.toString(), 0, 5);  
       rateField_ = pu.makeFloatEntryField(panelName_, 
-            Properties.Keys.PLUGIN_RATE_PIEZO_SHEET.toString(), 80, 5);
+            Properties.Keys.PLUGIN_RATE_PIEZO_SHEET.toString(), 100, 5);
       piezoDeltaField_ = pu.makeFloatEntryField(panelName_, 
-            Properties.Keys.PLUGIN_PIEZO_SHEET_INCREMENT.toString(), 10, 3);
+            Properties.Keys.PLUGIN_PIEZO_SHEET_INCREMENT.toString(), 5, 3);
       piezoDeltaField_.setToolTipText("Piezo increment used by up/down arrow buttons");
       
       JButton upButton = new JButton();
@@ -278,7 +278,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          public void actionPerformed(ActionEvent e) {
             try {
                positions_.setPosition(micromirrorDeviceKey_, 
-                       Joystick.Directions.Y, sliceStartPos_, true);
+                       Directions.Y, sliceStartPos_, true);
                positions_.setPosition(piezoImagingDeviceKey_,
                      imagingPiezoStartPos_, true);       
             } catch (Exception ex) {
@@ -298,7 +298,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          public void actionPerformed(ActionEvent e) {
             try {
                positions_.setPosition(micromirrorDeviceKey_, 
-                       Joystick.Directions.Y, sliceStopPos_, true);
+                       Directions.Y, sliceStopPos_, true);
                positions_.setPosition(piezoImagingDeviceKey_, 
                        imagingPiezoStopPos_, true);
             } catch (Exception ex) {
@@ -418,6 +418,11 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       imagingCenterPosLabel_.setMinimumSize(new Dimension(positionWidth, 20));
       slicePanel.add(imagingCenterPosLabel_);
       
+      // initialize the center position variable
+      imagingCenterPos_ = prefs_.getFloat(
+            MyStrings.PanelNames.SETUP.toString() + side.toString(), 
+            Properties.Keys.PLUGIN_PIEZO_CENTER_POS, 0);
+      
       
       tmp_but = new JButton("Go");
       tmp_but.setToolTipText("Moves piezo to specified center and also slice");
@@ -486,7 +491,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       slicePanel.add(new JLabel("Slice position:"));
       sheetPositionLabel_ = new JLabel("");
       slicePanel.add(sheetPositionLabel_);
-      slicePanel.add(pu.makeSetPositionField(micromirrorDeviceKey_, Joystick.Directions.Y, positions_));
+      slicePanel.add(pu.makeSetPositionField(micromirrorDeviceKey_, Directions.Y, positions_));
       
       tmp_but = new JButton("Go to 0");
       tmp_but.setMargin(new Insets(4,4,4,4));
@@ -502,7 +507,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       imagingPiezoPositionLabel_ = new JLabel("");
       slicePanel.add(imagingPiezoPositionLabel_);
       slicePanel.add(pu.makeSetPositionField(piezoImagingDeviceKey_, 
-              Joystick.Directions.NONE, positions_));
+              Directions.NONE, positions_));
       tmp_but = new JButton("Go to 0");
       tmp_but.setMargin(new Insets(4,4,4,4));      
       tmp_but.addActionListener(new ActionListener() {
@@ -529,7 +534,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       illuminationPiezoPositionLabel_.setMinimumSize(new Dimension(positionWidth, 20));
       sheetPanel.add(illuminationPiezoPositionLabel_);
       sheetPanel.add(pu.makeSetPositionField(piezoIlluminationDeviceKey_,
-            Joystick.Directions.NONE, positions_));
+            Directions.NONE, positions_));
 
       tmp_but = new JButton("Set home");
       tmp_but.setMargin(new Insets(4,4,4,4));
@@ -671,7 +676,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          positions_.setPosition(piezoImagingDeviceKey_, piezoPos, true);
          double galvoPos = computeGalvoFromPiezo(piezoPos);
          positions_.setPosition(micromirrorDeviceKey_,
-               Joystick.Directions.Y, galvoPos, true);
+               Directions.Y, galvoPos, true);
       } catch (Exception ex) {
          MyDialogUtils.showError(ex);
       }
@@ -751,7 +756,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       illuminationPiezoPositionLabel_.setText(
             positions_.getPositionString(piezoIlluminationDeviceKey_));
       sheetPositionLabel_.setText(
-            positions_.getPositionString(micromirrorDeviceKey_, Joystick.Directions.Y));
+            positions_.getPositionString(micromirrorDeviceKey_, Directions.Y));
    }
    
    /**

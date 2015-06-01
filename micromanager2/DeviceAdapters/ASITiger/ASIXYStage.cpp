@@ -261,7 +261,7 @@ int CXYStage::Initialize()
    AddAllowedValue(g_JoystickEnabledPropertyName, g_YesState);
    UpdateProperty(g_JoystickEnabledPropertyName);
 
-   if (firmwareVersion_ > 2.865)  // changed behavior of JS F and T as of v2.87
+   if (FirmwareVersionAtLeast(2.87))  // changed behavior of JS F and T as of v2.87
    {
       // fast wheel speed (JS F) (per-card, not per-axis)
       pAct = new CPropertyAction (this, &CXYStage::OnWheelFastSpeed);
@@ -468,7 +468,7 @@ int CXYStage::Stop()
 bool CXYStage::Busy()
 {
    ostringstream command; command.str("");
-   if (firmwareVersion_ > 2.7) // can use more accurate RS <axis>?
+   if (FirmwareVersionAtLeast(2.7)) // can use more accurate RS <axis>?
    {
       command << "RS " << axisLetterX_ << "?";
       if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // say we aren't busy if we can't communicate
@@ -507,7 +507,21 @@ bool CXYStage::Busy()
 int CXYStage::SetOrigin()
 {
    ostringstream command; command.str("");
-   command << "H " << axisLetterX_ << "=" << 0 << " " << axisLetterY_ << "=" << 0;
+   command << "H " << axisLetterX_ << "=0 " << axisLetterY_ << "=0";
+   return hub_->QueryCommandVerify(command.str(),":A");
+}
+
+int CXYStage::SetXOrigin()
+{
+   ostringstream command; command.str("");
+   command << "H " << axisLetterX_ << "=0 ";
+   return hub_->QueryCommandVerify(command.str(),":A");
+}
+
+int CXYStage::SetYOrigin()
+{
+   ostringstream command; command.str("");
+   command << "H " << axisLetterY_ << "=0";
    return hub_->QueryCommandVerify(command.str(),":A");
 }
 
@@ -520,7 +534,7 @@ int CXYStage::Home()
 
 int CXYStage::SetHome()
 {
-   if (firmwareVersion_ > 2.7) {
+   if (FirmwareVersionAtLeast(2.7)) {
       ostringstream command; command.str("");
       command << "HM " << axisLetterX_ << "+" << " " << axisLetterY_ << "+";
       return hub_->QueryCommandVerify(command.str(),":A");

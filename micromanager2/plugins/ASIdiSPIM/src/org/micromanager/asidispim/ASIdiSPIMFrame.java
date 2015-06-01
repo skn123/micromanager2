@@ -52,14 +52,13 @@ import org.micromanager.utils.MMFrame;
 
 //TODO devices tab automatically recognize default device names
 //TODO "swap sides" button (during alignment)
-//TODO setup tab have button for piezo/scanner go to 0 (eliminate calibration position display)
 //TODO alignment wizard that would guide through alignment steps
 //TODO easy mode that pulls most-used bits from all panels
-//TODO autofocus for finding calibration endpoints (http://dx.doi.org/10.1364/OE.16.008670, FFT method, or other)
 //TODO calibration for sheet width/offset (automatic based on image analysis?) and then optimize based on ROI
 //TODO recalculate slice timing automatically changing assigned camera
 //TODO add status bar to bottom of window (would include acquisition status, could show other messages too)
 //TODO move acquisition start/stop to shared area below tabs
+//TODO add ability of stage scan in 2nd dimension (for wide samples)
 //TODO make it easy to discard a data set
 //TODO make it easy to look through series of data sets
 //TODO hardware Z-projection
@@ -70,7 +69,7 @@ import org.micromanager.utils.MMFrame;
 //TODO cleanup prefs vs. props... maybe add boolean support for plugin device use only?
 //TODO finish eliminating Prefs.Keys in favor of Properties.Keys with plugin values
 //TODO save/load plugin settings from file instead of from registry (nice to also include controller settings)
-//TODO handle camera binning
+//TODO improve efficiency of camera code by pre-calculating key factors and updating when needed instead of calculating every time
 //TODO add check for correct Hamamatsu model
 
 

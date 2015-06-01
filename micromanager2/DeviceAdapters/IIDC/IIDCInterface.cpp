@@ -44,18 +44,6 @@
 namespace IIDC {
 namespace {
 
-// Usage: boost::lexical_cast< HexTo<uint32_t> >("1234abcd")
-template <typename T>
-class HexTo
-{
-   T value;
-public:
-   operator T() const { return value; }
-   friend std::istream& operator>>(std::istream& instrm, HexTo& out)
-   { instrm >> std::hex >> out.value; return instrm; }
-};
-
-
 static std::string
 CameraIdToString(const dc1394camera_id_t* id)
 {
@@ -73,7 +61,9 @@ StringToCameraId(const std::string& idString, dc1394camera_id_t* id)
       throw Error("Invalid camera id");
    try
    {
-      id->guid = boost::lexical_cast< HexTo<uint64_t> >(idString.substr(0, dashPos));
+      std::istringstream guidSS(idString.substr(0, dashPos));
+      guidSS >> std::hex >> id->guid;
+
       id->unit = boost::lexical_cast<uint16_t>(idString.substr(dashPos + 1));
    }
    catch (const boost::bad_lexical_cast&)
@@ -471,6 +461,10 @@ Camera::GetBitsPerSample()
    switch (mode->GetLibDC1394Coding())
    {
       case DC1394_COLOR_CODING_MONO8:
+      case DC1394_COLOR_CODING_YUV444:
+      case DC1394_COLOR_CODING_YUV422:
+      case DC1394_COLOR_CODING_YUV411:
+      case DC1394_COLOR_CODING_RGB8:
          return 8;
       case DC1394_COLOR_CODING_MONO16:
          {
@@ -636,7 +630,7 @@ Camera::StartContinuousCapture(uint32_t nrDMABuffers, size_t nrFrames,
    boost::shared_ptr<Capture> capture =
       boost::make_shared<ContinuousCapture>(libdc1394camera_,
             nrDMABuffers, nrFrames, firstFrameTimeoutMs,
-            boost::bind<void>(&Camera::HandleCapturedFrame, this, _1),
+            boost::bind(&Camera::HandleCapturedFrame, this, _1),
             finishCallback);
    RunCaptureInBackground(capture);
 }
@@ -656,7 +650,7 @@ Camera::StartMultiShotCapture(uint32_t nrDMABuffers, uint16_t nrFrames,
    boost::shared_ptr<Capture> capture =
       boost::make_shared<MultiShotCapture>(libdc1394camera_,
             nrDMABuffers, nrFrames, firstFrameTimeoutMs,
-            boost::bind<void>(&Camera::HandleCapturedFrame, this, _1),
+            boost::bind(&Camera::HandleCapturedFrame, this, _1),
             finishCallback);
    RunCaptureInBackground(capture);
 }
@@ -676,7 +670,7 @@ Camera::StartOneShotCapture(uint32_t nrDMABuffers, unsigned timeoutMs,
    boost::shared_ptr<Capture> capture =
       boost::make_shared<OneShotCapture>(libdc1394camera_,
             nrDMABuffers, timeoutMs,
-            boost::bind<void>(&Camera::HandleCapturedFrame, this, _1),
+            boost::bind(&Camera::HandleCapturedFrame, this, _1),
             finishCallback);
    RunCaptureInBackground(capture);
 }
@@ -754,19 +748,7 @@ Camera::RunCaptureInBackground(boost::shared_ptr<Capture> capture)
 void
 Camera::HandleCapturedFrame(dc1394video_frame_t* frame)
 {
-   PixelFormat pf = PixelFormatUnsupported;
-   switch (frame->color_coding)
-   {
-      case DC1394_COLOR_CODING_MONO8:
-         pf = PixelFormatGray8;
-         break;
-      case DC1394_COLOR_CODING_MONO16:
-         pf = PixelFormatGray16;
-         break;
-      default:
-         pf = PixelFormatUnsupported;
-         break;
-   }
+   PixelFormat pf = PixelFormatForLibDC1394ColorCoding(frame->color_coding);
    captureFrameCallback_(frame->image, frame->size[0], frame->size[1], pf);
 }
 
