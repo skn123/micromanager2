@@ -41,6 +41,7 @@ import ij.plugin.filter.GaussianBlur;
 import ij.plugin.frame.RoiManager;
 import ij.process.FloatPolygon;
 import ij.process.ImageProcessor;
+
 import java.awt.AWTEvent;
 import java.awt.HeadlessException;
 import java.awt.Point;
@@ -70,15 +71,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.prefs.Preferences;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
 import javax.swing.JOptionPane;
 import javax.swing.JSpinner;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 import javax.swing.text.DefaultFormatter;
+
 import mmcorej.CMMCore;
 import mmcorej.Configuration;
 import mmcorej.DeviceType;
 import mmcorej.TaggedImage;
+
 import org.json.JSONException;
 import org.micromanager.api.ScriptInterface;
 import org.micromanager.imagedisplay.VirtualAcquisitionDisplay;
@@ -407,7 +411,7 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
     * location on the camera.  Does not do sub-pixel localization, but could
     * (just would change its return type, most other code would be OK with this)
    */
-   private Point measureSpotOnCamera(Point2D.Double projectionPoint) {
+   private Point measureSpotOnCamera(Point2D.Double projectionPoint, boolean addToAlbum) {
       if (stopRequested_.get()) {
          return null;
       }
@@ -418,8 +422,8 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
          core_.snapImage();
          TaggedImage image = core_.getTaggedImage();
          ImageProcessor proc1 = ImageUtils.makeMonochromeProcessor(image);
-         // JonD: should use the exposure that the user has set; if the user
-         // wants a different exposure time for calibration he should just specify that!
+         // JonD: should use the exposure that the user has set to avoid hardcoding a value;
+         // if the user wants a different exposure time for calibration it's easy to specify
          // => commenting out next two lines
          // long originalExposure = dev_.getExposure();
          // dev_.setExposure(500000);
@@ -433,18 +437,21 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
          Thread.sleep(delayMs);
          core_.snapImage();
          // NS: just make sure to wait until the spot is no longer displayed
-         // JonD: time to wait is simply the exposure time
-         Thread.sleep((int) (dev_.getExposure()/1000) - delayMs);
+         // JonD: time to wait is simply the exposure time less any delay
+          Thread.sleep((int) (dev_.getExposure()/1000) - delayMs);
          // JonD: see earlier comment => commenting out next line
          // dev_.setExposure(originalExposure);
          TaggedImage taggedImage2 = core_.getTaggedImage();
          ImageProcessor proc2 = ImageUtils.makeMonochromeProcessor(taggedImage2);
          app_.displayImage(taggedImage2);
-         // saving images to album is useful for debugging, TODO add debug mode where this happens
-         // app_.addToAlbum(taggedImage2);
+         // saving images to album is useful for debugging
+         // TODO figure out why this doesn't work towards the end; maybe limitation on # of images in album
+         // if (addToAlbum) {
+         //    app_.addToAlbum(taggedImage2);
+         // }
          ImageProcessor diffImage = ImageUtils.subtractImageProcessors(proc2.convertToFloatProcessor(), proc1.convertToFloatProcessor());
          Point maxPt = findPeak(diffImage);
-         IJ.getImage().setRoi(new PointRoi(maxPt.x, maxPt.y));
+         app_.getSnapLiveWin().getImagePlus().setRoi(new PointRoi(maxPt.x, maxPt.y));
          // NS: what is this second sleep good for????
          // core_.sleep(500);
          return maxPt;
@@ -460,7 +467,7 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
     */
    private void measureAndAddToSpotMap(Map<Point2D.Double, Point2D.Double> spotMap,
          Point2D.Double ptSLM) {
-      Point ptCam = measureSpotOnCamera(ptSLM);
+      Point ptCam = measureSpotOnCamera(ptSLM, false);
       Point2D.Double ptCamDouble = new Point2D.Double(ptCam.x, ptCam.y);
       spotMap.put(ptCamDouble, ptSLM);
    }
@@ -473,7 +480,7 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
    private AffineTransform generateLinearMapping() {
       double centerX = dev_.getXRange() / 2 + dev_.getXMinimum();
       double centerY = dev_.getYRange() / 2 + dev_.getYMinimum();
-      double spacing = Math.min(dev_.getXRange(), dev_.getYRange()) / 10;
+      double spacing = Math.min(dev_.getXRange(), dev_.getYRange()) / 10;  // use 10% of galvo/SLM range
       Map<Point2D.Double, Point2D.Double> spotMap
             = new HashMap<Point2D.Double, Point2D.Double>();
 
@@ -486,7 +493,11 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
          return null;
       }
       try {
-         return MathFunctions.generateAffineTransformFromPointPairs(spotMap, spacing, Double.MAX_VALUE);
+         // require that the RMS value between the mapped points and the measured points be less than 5% of image size
+         // also require that the RMS value be less than the spacing between points in the galvo/SLM coordinate system
+         // (2nd requirement was probably the intent of the code until r15505, but parameters were interchanged in call) 
+         final long imageSize = Math.min(core_.getImageWidth(), core_.getImageHeight()); 
+         return MathFunctions.generateAffineTransformFromPointPairs(spotMap, imageSize*0.05, spacing);
       } catch (Exception e) {
          throw new RuntimeException("Spots aren't detected as expected. Is DMD in focus and roughly centered in camera's field of view?");
       }
@@ -505,18 +516,20 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
    private Map<Polygon, AffineTransform> generateNonlinearMapping() {
       
       // get the affine transform near the center spot
-      // then use it to estimate what SLM coordinates correspond to 
-      // the image's corner positions 
       final AffineTransform firstApproxAffine = generateLinearMapping();
+      
+      // then use this single transform to estimate what SLM coordinates 
+      // correspond to the image's corner positions 
       final Point2D.Double camCorner1 = (Point2D.Double) firstApproxAffine.transform(new Point2D.Double(0, 0), null);
       final Point2D.Double camCorner2 = (Point2D.Double) firstApproxAffine.transform(new Point2D.Double((int) core_.getImageWidth(), (int) core_.getImageHeight()), null);
       final Point2D.Double camCorner3 = (Point2D.Double) firstApproxAffine.transform(new Point2D.Double(0, (int) core_.getImageHeight()), null);
       final Point2D.Double camCorner4 = (Point2D.Double) firstApproxAffine.transform(new Point2D.Double((int) core_.getImageWidth(), 0), null);
 
-      // these are camera's bounds in SLM coordinates
+      // figure out camera's bounds in SLM coordinates
       // min/max because we don't know the relative orientation of the camera and SLM
       // do some extra checking in case camera/SLM aren't at exactly 90 degrees from each other, 
       // but still better that they are at 0, 90, 180, or 270 degrees from each other
+      // TODO can create grid along camera location instead of SLM's if camera is the limiting factor; this will make arbitrary rotation possible
       final double camLeft = Math.min(Math.min(Math.min(camCorner1.x, camCorner2.x), camCorner3.x), camCorner4.x);
       final double camRight = Math.max(Math.max(Math.max(camCorner1.x, camCorner2.x), camCorner3.x), camCorner4.x);
       final double camTop = Math.min(Math.min(Math.min(camCorner1.y, camCorner2.y), camCorner3.y), camCorner4.y);
@@ -551,7 +564,7 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
             double xoffset = ((i + 0.5) * width / (nGrid + 1.0));
             double yoffset = ((j + 0.5) * height / (nGrid + 1.0));
             slmPoint[i][j] = new Point2D.Double(left + xoffset, top + yoffset);
-            Point spot = measureSpotOnCamera(slmPoint[i][j]);
+            Point spot = measureSpotOnCamera(slmPoint[i][j], true);
             if (spot != null) {
                camPoint[i][j] = toDoublePoint(spot);
             }
@@ -612,10 +625,13 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
                try {
                   isRunning_.set(true);
                   Roi originalROI = IJ.getImage().getRoi();
-                  app_.snapSingleImage();
+                  
+                  // JonD: don't understand why we do this
+                  // app_.snapSingleImage();
 
                   // do the heavy lifting of generating the local affine transform map
-                  HashMap<Polygon, AffineTransform> mapping = (HashMap<Polygon, AffineTransform>) generateNonlinearMapping();
+                  HashMap<Polygon, AffineTransform> mapping = 
+                        (HashMap<Polygon, AffineTransform>) generateNonlinearMapping();
                   
                   dev_.turnOff();
                   try {
@@ -625,6 +641,7 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
                   }
                   
                   // save local affine transform map to preferences
+                  // TODO allow different mappings to be stored for different channels (e.g. objective magnification)
                   if (!stopRequested_.get()) {
                      saveMapping(mapping);
                   }
@@ -633,13 +650,14 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
                   JOptionPane.showMessageDialog(IJ.getImage().getWindow(), "Calibration "
                         + (!stopRequested_.get() ? "finished." : "canceled."));
                   IJ.getImage().setRoi(originalROI);
-                  calibrateButton_.setText("Calibrate");
                } catch (HeadlessException e) {
                   ReportingUtils.showError(e);
-                  calibrateButton_.setText("Calibrate");
+               } catch (RuntimeException e) {
+                  ReportingUtils.showError(e);
                } finally {
                   isRunning_.set(false);
                   stopRequested_.set(false);
+                  calibrateButton_.setText("Calibrate");
                }
             }
          };
@@ -764,6 +782,7 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
    // Turn on/off point and shoot mode.
    public void enablePointAndShootMode(boolean on) {
       if (on && (mapping_ == null)) {
+         ReportingUtils.showError("Please calibrate the phototargeting device first, using the Setup tab.");
          throw new RuntimeException("Please calibrate the phototargeting device first, using the Setup tab.");
       }
       pointAndShooteModeOn_.set(on);
@@ -1016,10 +1035,8 @@ public class ProjectorControlForm extends MMFrame implements OnStateListener {
    
    /**
     * Upload current Window's ROIs, transformed, to the phototargeting device.
-    * BUG!!! Since Polygons store coordinates in integers whereas Galvo
-    * devices have an input as double, there is an enormous loss of precision.
-    * The Type "Polygon" should be replaced with Path2D.Double throughout the code
-    * or possibly the ImageJ class FloatPolygon
+    * Polygons store camera coordinates in integers, and we use 
+    * the ImageJ class FloatPolygon for corresponding scanner coordinates
     */
    public void sendCurrentImageWindowRois() {
       if (mapping_ == null) {
