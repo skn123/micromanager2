@@ -187,7 +187,11 @@ singleFrameModeReady_(false),
 sequenceModeReady_(false),
 isUsingCallbacks_(false),
 isAcquiring_(false),
+<<<<<<< HEAD
 triggerTimeout_(10),
+=======
+triggerTimeout_(7),
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
 microsecResSupported_(false),
 pollingThd_(0),
 notificationThd_(0),

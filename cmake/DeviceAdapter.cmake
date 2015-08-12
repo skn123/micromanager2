@@ -113,7 +113,7 @@ FOREACH(Adapter ${MY_ADAPTERS})
   IF(DeviceAdapter_${Adapter}_ENABLE)
     SET(${Adapter}_DIR ${PROJECT_SOURCE_DIR}/micromanager2/DeviceAdapters/${Adapter})
     INCLUDE_DIRECTORIES(${${Adapter}_DIR})
-    FILE(GLOB_RECURSE ${Adapter}_SRCS  ${${Adapter}_DIR}/*.cpp ${${Adapter}_DIR}/*.h)
+    FILE(GLOB ${Adapter}_SRCS  ${${Adapter}_DIR}/*.cpp ${${Adapter}_DIR}/*.h)
     ADD_LIBRARY(mmgr_dal_${Adapter} SHARED 
                                     ${${Adapter}_SRCS}
                                     $<TARGET_OBJECTS:MMDevice_DeviceAdapters>

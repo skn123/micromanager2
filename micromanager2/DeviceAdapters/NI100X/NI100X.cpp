@@ -581,9 +581,13 @@ int DigitalIO::OnState(MM::PropertyBase* pProp, MM::ActionType eAct)
          data = state;
          niRet = DAQmxWriteDigitalU32(task_, 1, 1, 10.0, DAQmx_Val_GroupByChannel, &data, &written, NULL);
          if (niRet != DAQmxSuccess)
+<<<<<<< HEAD
          {
             return LogError(niRet, "WriteDigitalU32");
          }
+=======
+            return (int)niRet;
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       }
       else {
          long closed_state;

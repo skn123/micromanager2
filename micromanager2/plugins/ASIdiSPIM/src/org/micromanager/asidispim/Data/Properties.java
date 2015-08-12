@@ -206,8 +206,12 @@ public class Properties {
       PLUGIN_AUTOFOCUS_ACQBEFORESTART("AutofocusDoBeforeACQStart"),
       PLUGIN_AUTOFOCUS_EACHNIMAGES("AutofocusEachNTimePoints"),
       PLUGIN_AUTOFOCUS_CHANNEL("AutofocusChannel"),
+<<<<<<< HEAD
       PLUGIN_AUTOFOCUS_MINIMUMR2("AutofocusMinimumR2"),
       PLUGIN_ADVANCED_CAMERA_EXPOSURE("AdvancedCameraExposure")
+=======
+      PLUGIN_AUTOFOCUS_MINIMUMR2("AutofocusMinimumR2")
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       ;
       private final String text;
       private final boolean hasPattern;  // true if string has substitution pattern

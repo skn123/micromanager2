@@ -51,6 +51,10 @@ import org.micromanager.api.ScriptInterface;
 import org.micromanager.asidispim.Utils.AutofocusUtils;
 import org.micromanager.internalinterfaces.LiveModeListener;
 import org.micromanager.utils.MMFrame;
+<<<<<<< HEAD
+=======
+import org.micromanager.utils.ReportingUtils;
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
 
 /**
  *
@@ -82,6 +86,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
    private double imagingPiezoStartPos_;
    private double imagingPiezoStopPos_;
    private double imagingCenterPos_;
+   private Point2D.Double xyCenterPos_;
    private double sliceStartPos_;
    private double sliceStopPos_;
    private final JCheckBox illumPiezoHomeEnable_;
@@ -239,10 +244,17 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          public void actionPerformed(ActionEvent e) {
             autofocus_.runFocus(setupPanel, side, true,
                     ASIdiSPIM.getFrame().getAcquisitionPanel().getSliceTiming(),
+<<<<<<< HEAD
                     true, true);
          }
       });
       calibrationPanel.add(tmp_but, "center, span 3");
+=======
+                    true);
+         }
+      });
+      calibrationPanel.add(tmp_but, "center, span 3, wrap");
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       
       // start 2-point calibration frame
       // this frame is separate from main plugin window
@@ -374,7 +386,11 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          public void actionPerformed(ActionEvent e) {
             autofocus_.runFocus(setupPanel, side, true,
                     ASIdiSPIM.getFrame().getAcquisitionPanel().getSliceTiming(),
+<<<<<<< HEAD
                     true, true);
+=======
+                    true);
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
          }
       });
       slopeCalibrationPanel.add(tmp_but);
@@ -443,6 +459,45 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       });
       slicePanel.add(tmp_but, "wrap");
       
+<<<<<<< HEAD
+=======
+      slicePanel.add(new JLabel("XY center: "));
+      slicePanel.add(new JLabel(""));   // TODO update this label with current value
+      
+      tmp_but = new JButton("Go");
+      tmp_but.setToolTipText("Moves XY stage to specified center");
+      tmp_but.addActionListener(new ActionListener() {
+         @Override
+         public void actionPerformed(ActionEvent e) {
+            // TODO replace with positions_ call to 2D position set (need to implement still)
+            try {
+               core_.setXYPosition(xyCenterPos_.x, xyCenterPos_.y);
+            } catch (Exception ex) {
+               ReportingUtils.showError(ex);
+            }
+         }
+      } );
+      slicePanel.add(tmp_but);
+      
+      tmp_but = new JButton("Set");
+      tmp_but.setToolTipText("Sets XY center position for acquisition");
+      tmp_but.setBackground(Color.red);
+      tmp_but.addActionListener(new ActionListener() {
+
+         @Override
+         public void actionPerformed(ActionEvent e) {
+         // TODO replace with positions_ call to 2D position set (need to implement still)
+            try {
+               xyCenterPos_ = core_.getXYStagePosition(
+                     devices_.getMMDeviceException(Devices.Keys.XYSTAGE));
+            } catch (Exception ex) {
+               MyDialogUtils.showError(ex);
+            }
+         }
+      });
+      slicePanel.add(tmp_but, "wrap");
+      
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       slicePanel.add(new JSeparator(SwingConstants.HORIZONTAL), "span 5, growx, shrinky, wrap");
       
       slicePanel.add(new JLabel("Slice position:"));
@@ -473,7 +528,11 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
             positions_.setPosition(piezoImagingDeviceKey_, 0.0, true);
          }
       } );
+<<<<<<< HEAD
       slicePanel.add(tmp_but);
+=======
+      slicePanel.add(tmp_but, "wrap");
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
 
       
       // Create sheet controls
@@ -612,6 +671,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          MyDialogUtils.showError(ex);
       }
    }
+<<<<<<< HEAD
 
    /**
     * Give autofocus and acquisition the opportunity to update the offset
@@ -620,6 +680,8 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
    public void updateCalibrationOffset(double newValue) {
       offsetField_.setValue(newValue);
    }
+=======
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
    
    /**
     * Performs "2-point" calibration updating the offset and slope.

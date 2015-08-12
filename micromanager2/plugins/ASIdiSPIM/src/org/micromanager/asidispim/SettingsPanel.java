@@ -167,6 +167,7 @@ public class SettingsPanel extends ListeningJPanel {
       // end camera panel
       
       
+<<<<<<< HEAD
       // construct main panel
       add(guiPanel);
       add(scannerPanel);
@@ -190,7 +191,29 @@ public class SettingsPanel extends ListeningJPanel {
          add(stageScanPanel, "growx");
        }
       // end stage scan panel
+=======
+      // start stage scan panel
       
+      final JPanel stageScanPanel = new JPanel(new MigLayout(
+            "",
+            "[right]16[center]",
+            "[]8[]"));
+      stageScanPanel.setBorder(PanelUtils.makeTitledBorder("Stage scanning"));
+
+      stageScanPanel.add(new JLabel("Motor acceleration time [ms]:"));
+      final JSpinner stageAccelTime = pu.makeSpinnerFloat(10, 1000, 10,
+            Devices.Keys.XYSTAGE,
+            Properties.Keys.STAGESCAN_MOTOR_ACCEL, 50);
+      stageScanPanel.add(stageAccelTime, "wrap");
+>>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
+      
+      // end stage scan panel
+      
+      // construct main panel
+      add(guiPanel);
+      add(scannerPanel);
+      add(cameraPanel, "wrap");
+      add(stageScanPanel, "growx");
       
       
    }
