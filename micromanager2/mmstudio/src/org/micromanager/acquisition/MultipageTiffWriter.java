@@ -114,7 +114,6 @@ public class MultipageTiffWriter {
    //Reader associated with this file
    private MultipageTiffReader reader_;
    private long blankPixelsOffset_ = -1;
-   private String summaryMDString_;
    private boolean fastStorageMode_;
    
    public MultipageTiffWriter(String directory, String filename, 
@@ -161,11 +160,6 @@ public class MultipageTiffWriter {
       buffers_ = new LinkedList<ByteBuffer>();
       
       writeMMHeaderAndSummaryMD(summaryMD);
-      try {
-         summaryMDString_ = summaryMD.toString(2);
-      } catch (JSONException ex) {
-         summaryMDString_ = "";
-      }
    }
    
    private ByteBuffer allocateByteBuffer(int capacity) {
@@ -309,9 +303,9 @@ public class MultipageTiffWriter {
    }
 
    /**
-    * Called when entire set of files (i.e. acquisition) is finished. Adds in all the extra
-    * (but nonessential) stuff--comments, display settings, OME/IJ metadata, and truncates the
-    * file to a reasonable length
+    * Called when entire set of files (i.e. acquisition) is finished. Adds in
+    * all the extra (but nonessential) stuff--comments, display settings,
+    * OME/IJ metadata, and truncates the file to a reasonable length
     */
    public void close(String omeXML) throws IOException {
       String summaryComment = "";
@@ -328,7 +322,7 @@ public class MultipageTiffWriter {
 
       if (omeTiff_) {
          try {
-            writeImageDescription(omeXML, omeDescriptionTagPosition_);                 
+            writeImageDescription(omeXML, omeDescriptionTagPosition_);
          } catch (Exception ex) {
             ReportingUtils.showError("Error writing OME metadata");
          }
@@ -359,7 +353,7 @@ public class MultipageTiffWriter {
       //5 MB extra padding..just to be safe
       int extraPadding = 5000000; 
       long size = length + SPACE_FOR_COMMENTS + numChannels_ * DISPLAY_SETTINGS_BYTES_PER_CHANNEL + extraPadding + filePosition_;
-      if ( size >= MAX_FILE_SIZE) {
+      if (size >= MAX_FILE_SIZE) {
          return false;
       }
       return true;
@@ -490,6 +484,7 @@ public class MultipageTiffWriter {
          img.tags.remove("Summary");
       }
       byte[] mdBytes = getBytesFromString(img.tags.toString() + " ");
+      mdBytes[mdBytes.length - 1] = 0; // null terminate TIFF ASCII string
 
       //2 bytes for number of directory entries, 12 bytes per directory entry, 4 byte offset of next IFD
      //6 bytes for bits per sample if RGB, 16 bytes for x and y resolution, 1 byte per character of MD string
@@ -690,9 +685,9 @@ public class MultipageTiffWriter {
     * expanded to write ROIs, file info, slice labels, and overlays
     */
    private void writeImageJMetadata(int numChannels, String summaryComment) throws IOException {
-      String infoString = summaryMDString_;
+      String infoString = masterMPTiffStorage_.getSummaryMetadataString();
       if (summaryComment != null && summaryComment.length() > 0) {
-         infoString = "Acquisition comments: \n" + summaryComment + "\n\n\n" + summaryMDString_;
+         infoString = "Acquisition comments: \n" + summaryComment + "\n\n\n" + infoString;
       }
       char[] infoChars = infoString.toCharArray();
       int infoSize = 2 * infoChars.length;
@@ -859,17 +854,19 @@ public class MultipageTiffWriter {
       return new String(sb);
    }
 
-   private void writeImageDescription(String value, long imageDescriptionTagOffset) throws IOException {
+   private void writeImageDescription(String text, long imageDescriptionTagOffset) throws IOException {
+      byte[] bytes = getBytesFromString(text + " ");
+      bytes[bytes.length - 1] = 0; // null terminate TIFF ASCII string
+
       //write first image IFD
       ByteBuffer ifdCountAndValueBuffer = allocateByteBuffer(8);
-      ifdCountAndValueBuffer.putInt(0, value.length());
+      ifdCountAndValueBuffer.putInt(0, bytes.length);
       ifdCountAndValueBuffer.putInt(4, (int) filePosition_);
       fileChannelWrite(ifdCountAndValueBuffer, imageDescriptionTagOffset + 4);
 
       //write String
-      ByteBuffer buffer = ByteBuffer.wrap(getBytesFromString(value));
-      fileChannelWrite(buffer, filePosition_);
-      filePosition_ += buffer.capacity();
+      fileChannelWrite(ByteBuffer.wrap(bytes), filePosition_);
+      filePosition_ += bytes.length;
    }
 
    private byte[] getBytesFromString(String s) {

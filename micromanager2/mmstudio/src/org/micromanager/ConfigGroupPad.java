@@ -20,7 +20,7 @@
 //CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 
-//CVS:          $Id: ConfigGroupPad.java 14678 2014-11-21 00:24:28Z mark $
+//CVS:          $Id: ConfigGroupPad.java 15534 2015-06-17 18:33:11Z mark $
 
 package org.micromanager;
 
@@ -270,10 +270,6 @@ public class ConfigGroupPad extends JScrollPane{
          try {
             ReportingUtils.logMessage("Rebuilding config group table");
             StrVector groups = core_.getAvailableConfigGroups();
-            HashMap<String, String> oldGroupHash = new HashMap<String, String>();
-            for (StateItem group : groupList_) {
-               oldGroupHash.put(group.group, group.config);
-            }
             groupList_.clear();
 
             for (String group : groups) {
@@ -334,7 +330,8 @@ public class ConfigGroupPad extends JScrollPane{
             ReportingUtils.logMessage("Refreshing config group table");
             for (StateItem item : groupList_) {
                if (item.singleProp) {
-                  item.config = core_.getProperty(item.device, item.name);
+                  item.setValueFromCoreString(core_.getProperty(item.device, item.name));
+                  item.config = item.value;
                } else {
                   item.config = core_.getCurrentConfig(item.group);
                   // set descr to current situation so that Tooltips get updated

@@ -105,10 +105,9 @@ extern "C" {
    MODULE_API bool GetDeviceType(const char* deviceName, int* type);
    MODULE_API bool GetDeviceDescription(const char* deviceName, char* name, unsigned bufferLength);
 
-   
    // Function pointer types for module interface functions
    // (Not for use by device adapters)
-#ifdef MMCORE_MODULE_EXPORTS
+#ifndef MODULE_EXPORTS
    typedef void (*fnInitializeModuleData)();
    typedef MM::Device* (*fnCreateDevice)(const char*);
    typedef void (*fnDeleteDevice)(MM::Device*);
@@ -119,7 +118,6 @@ extern "C" {
    typedef bool (*fnGetDeviceType)(const char*, int*);
    typedef bool (*fnGetDeviceDescription)(const char*, char*, unsigned);
 #endif
-
 }
 
 

@@ -187,7 +187,7 @@ singleFrameModeReady_(false),
 sequenceModeReady_(false),
 isUsingCallbacks_(false),
 isAcquiring_(false),
-triggerTimeout_(2),
+triggerTimeout_(10),
 microsecResSupported_(false),
 pollingThd_(0),
 notificationThd_(0),
@@ -199,19 +199,35 @@ binYSize_(1),
 newBinSize_(1),
 newBinXSize_(1),
 newBinYSize_(1),
+prmTemp_(0),
+prmTempSetpoint_(0),
+prmGainIndex_(0),
+prmGainMultFactor_(0),
 redScale_(1.0),
 greenScale_(1.0),
 blueScale_(1.0),
 selectedCFAmask_(CFA_RGGB),
 selectedInterpolationAlgorithm_(ALG_REPLICATION),
-rgbaColor_(false)
+rgbaColor_(false),
+newRgbaColor_(false),
 #ifdef PVCAM_SMART_STREAMING_SUPPORTED
-, smartStreamEntries_(4),
-ssWasOn_(false)
+smartStreamEntries_(4),
+ssWasOn_(false),
 #endif
 #ifdef PVCAM_FRAME_INFO_SUPPORTED
-,pFrameInfo_(0)
+pFrameInfo_(0),
 #endif
+#ifdef PVCAM_SMART_STREAMING_SUPPORTED
+prmSmartStreamingValues_(0),
+prmSmartStreamingEnabled_(0),
+#endif
+prmTriggerMode_(0),
+prmExpResIndex_(0),
+prmExpRes_(0),
+prmExposeOutMode_(0),
+prmClearCycles_(0),
+prmReadoutPort_(0),
+prmColorMode_(0)
 {
    InitializeDefaultErrorMessages();
 
@@ -219,6 +235,7 @@ ssWasOn_(false)
    SetErrorText(ERR_CAMERA_NOT_FOUND, "No Camera Found. Is it connected and switched on?");
    SetErrorText(ERR_BUSY_ACQUIRING, "Acquisition already in progress.");
    SetErrorText(ERR_ROI_SIZE_NOT_SUPPORTED, "Selected ROI is not supported by the camera");
+   SetErrorText(ERR_BUFFER_TOO_LARGE, "Buffer too large");
    
    pollingThd_ = new PollingThread(this);             // Pointer to the sequencing thread
 
@@ -228,18 +245,6 @@ ssWasOn_(false)
    // frames away earlier because those old frames could soon get overwritten.
    notificationThd_ = new NotificationThread(this);
    notificationThd_->activate();
-
-   prmTemp_           = NULL;
-   prmTempSetpoint_   = NULL;
-   prmGainIndex_      = NULL;
-   prmGainMultFactor_ = NULL;
-   prmExpResIndex_    = NULL;
-   prmExpRes_         = NULL;
-   prmTriggerMode_    = NULL;
-   prmExposeOutMode_  = NULL;
-   prmClearCycles_    = NULL;
-   prmReadoutPort_    = NULL;
-   prmColorMode_      = NULL;
 }
 
 
@@ -951,28 +956,22 @@ int Universal::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
    if (eAct == MM::AfterSet)
    {
       pProp->Get(bin);
-      if (!IsCapturing())
-      {
-         // If not capturing then change the bin immediately so it gets
-         // reflected in the UI.
-         binSize_ = bin;
-         // Setting the symmetric bin resets the assymetric bin
-         binXSize_= bin;
-         binYSize_= bin;
-         SetROI( 0, 0, camSerSize_, camParSize_ );
-      }
-      // If we are in the live mode, we just store the new values
-      // and resize the buffer once the acquisition is started again.
-      // (this fixes a crash that occured when switching binning during live mode)
       newBinSize_ = bin;
+      // Setting the symmetric bin resets the asymetric bin
       newBinXSize_ = bin;
       newBinYSize_ = bin;
+      if (!IsCapturing())
+         SetROI( roi_.newX*roi_.binXSize/binXSize_, roi_.newY*roi_.binYSize/binYSize_, roi_.newXSize*roi_.binXSize/binXSize_, roi_.newYSize*roi_.binYSize/binYSize_ );
+
       sequenceModeReady_ = false;
       singleFrameModeReady_ = false;
    }
    else if (eAct == MM::BeforeGet)
    {
-      pProp->Set((long)binSize_);
+      if (!IsCapturing())
+         pProp->Set((long)newBinSize_);
+      else
+         pProp->Set((long)binSize_);
    }
    return DEVICE_OK;
 }
@@ -995,24 +994,25 @@ int Universal::OnBinningX(MM::PropertyBase* pProp, MM::ActionType eAct)
       pProp->Get(binX);
       if (binX < 1)
       {
-         LogMMError( 0, __LINE__, "Value of BinningX cannot be negative" );
+         LogMMError( 0, __LINE__, "Value of BinningX has to be positive" );
          ret = DEVICE_INVALID_PROPERTY_VALUE;
       }
       else
       {
-         if (!IsCapturing())
-         {
-            binXSize_= binX;
-            SetROI( 0, 0, camSerSize_, camParSize_ );
-         }
          newBinXSize_ = binX;
+         if (!IsCapturing())
+            SetROI( roi_.newX*roi_.binXSize/binXSize_, roi_.newY*roi_.binYSize/binYSize_, roi_.newXSize*roi_.binXSize/binXSize_, roi_.newYSize*roi_.binYSize/binYSize_ );
+
          sequenceModeReady_ = false;
          singleFrameModeReady_ = false;
       }
    }
    else if (eAct == MM::BeforeGet)
    {
-      pProp->Set((long)binXSize_);
+      if (!IsCapturing())
+         pProp->Set((long)newBinXSize_);
+      else
+         pProp->Set((long)binXSize_);
    }
    return ret;
 }
@@ -1034,24 +1034,25 @@ int Universal::OnBinningY(MM::PropertyBase* pProp, MM::ActionType eAct)
       pProp->Get(binY);
       if (binY < 1)
       {
-         LogMMError( 0, __LINE__, "Value of BinningY cannot be negative" );
+         LogMMError( 0, __LINE__, "Value of BinningY has to be positive" );
          ret = DEVICE_INVALID_PROPERTY_VALUE;
       }
       else
       {
-         if (!IsCapturing())
-         {
-            binYSize_= binY;
-            SetROI( 0, 0, camSerSize_, camParSize_ );
-         }
          newBinYSize_ = binY;
+         if (!IsCapturing())
+            SetROI( roi_.newX*roi_.binXSize/binXSize_, roi_.newY*roi_.binYSize/binYSize_, roi_.newXSize*roi_.binXSize/binXSize_, roi_.newYSize*roi_.binYSize/binYSize_ );
+
          sequenceModeReady_ = false;
          singleFrameModeReady_ = false;
       }
    }
    else if (eAct == MM::BeforeGet)
    {
-      pProp->Set((long)binYSize_);
+      if (!IsCapturing())
+         pProp->Set((long)newBinYSize_);
+      else
+         pProp->Set((long)binYSize_);
    }
    return ret;
 }
@@ -2003,6 +2004,28 @@ int Universal::SnapImage()
       MM::MMTime mid = GetCurrentMMTime();
       LogTimeDiff(start, mid, "Exposure took 1: ", true);
 
+      if ( binSize_ != newBinSize_ || binXSize_ != newBinXSize_ || binYSize_ != newBinYSize_ )
+      {
+         // Binning has changed so we need to update the ROI
+         // SetROI also reallocates image buffer, call here roi_.PVCAMRegion only,
+         // the buffer will be reallocated in ResizeImageBufferSingle
+         //SetROI( roi_.newX*roi_.binXSize/binXSize_, roi_.newY*roi_.binYSize/binYSize_, roi_.newXSize*roi_.binXSize/binXSize_, roi_.newYSize*roi_.binYSize/binYSize_ );
+         roi_.PVCAMRegion( (uns16)(roi_.newX*roi_.binXSize), (uns16)(roi_.newY*roi_.binYSize),
+                           (uns16)(roi_.newXSize*roi_.binXSize), (uns16)(roi_.newYSize*roi_.binYSize),
+                           (uns16)newBinXSize_, (uns16)newBinYSize_, camRegion_ );
+         // Update properties
+         binSize_ = newBinSize_;
+         binXSize_ = newBinXSize_;
+         binYSize_ = newBinYSize_;
+         // TODO: Should we enforce prop. browser UI update or wait until user clicks the Refresh button?
+         //GetCoreCallback()->OnPropertiesChanged(this); // Notify the MM UI to update
+      }
+
+      if (rgbaColor_ != newRgbaColor_)
+      {
+         rgbaColor_ = newRgbaColor_;
+      }
+
       nRet = ResizeImageBufferSingle();
       if (nRet != DEVICE_OK) 
          return LogMMError(nRet, __LINE__);
@@ -2264,14 +2287,15 @@ int Universal::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
    // This might be a bug in the adapter code that makes the MM behave this way but I haven't found where.
    if ( x == 0 && y == 0 && xSize == camSerSize_ && ySize == camParSize_ )
    {
-      roi_.PVCAMRegion( (uns16)x, (uns16)y, (uns16)xSize, (uns16)ySize,
-                        (uns16)binXSize_, (uns16)binYSize_, camRegion_ );
+      roi_.PVCAMRegion( (uns16)x, (uns16)y,
+                        (uns16)xSize, (uns16)ySize,
+                        (uns16)newBinXSize_, (uns16)newBinYSize_, camRegion_ );
    }
    else
    {
       roi_.PVCAMRegion( (uns16)(x*binXSize_), (uns16)(y*binYSize_),
                         (uns16)(xSize*binXSize_), (uns16)(ySize*binYSize_),
-                        (uns16)binXSize_, (uns16)binYSize_, camRegion_ );
+                        (uns16)newBinXSize_, (uns16)newBinYSize_, camRegion_ );
    }
 
    // after a parameter is set, micromanager checks the size of the image,
@@ -2639,6 +2663,11 @@ int Universal::ResizeImageBufferContinuous()
           circBufFrameCount_ = (std::min)(circBufFrameCount_, CIRC_BUF_FRAME_CNT_MAX);
       }
 
+      // PVCAM does not support buffers larger that 4GB
+      const ulong64 bufferSize = circBufFrameCount_ * static_cast<ulong64>(frameSize);
+      if (bufferSize > 0xFFFFFFFF)
+          return LogMMError(ERR_BUFFER_TOO_LARGE, __LINE__);
+
       circBuf_.Resize(frameSize, circBufFrameCount_);
       //OnPropertiesChanged(); // Notify the Core that the circ buf frame count has chenged
       // Set the queue size to slightly less than the CB size to avoid PVCAM overwritting
@@ -2857,17 +2886,29 @@ int Universal::PrepareSequenceAcqusition()
    {
       if ( binSize_ != newBinSize_ || binXSize_ != newBinXSize_ || binYSize_ != newBinYSize_ )
       {
-         // Binning has changed so we need to reset the ROI
-         roi_.PVCAMRegion( 0, 0, camSerSize_, camParSize_, (uns16)newBinXSize_,(uns16)newBinYSize_, camRegion_ );
+         // Binning has changed so we need to update the ROI
+         // SetROI also reallocates image buffer, call here roi_.PVCAMRegion only,
+         // the buffer will be reallocated in ResizeImageBufferContinuous
+         //SetROI( roi_.newX*roi_.binXSize/binXSize_, roi_.newY*roi_.binYSize/binYSize_, roi_.newXSize*roi_.binXSize/binXSize_, roi_.newYSize*roi_.binYSize/binYSize_ );
+         roi_.PVCAMRegion( (uns16)(roi_.newX*roi_.binXSize), (uns16)(roi_.newY*roi_.binYSize),
+                           (uns16)(roi_.newXSize*roi_.binXSize), (uns16)(roi_.newYSize*roi_.binYSize),
+                           (uns16)newBinXSize_, (uns16)newBinYSize_, camRegion_ );
+         // Update properties
+         binSize_ = newBinSize_;
+         binXSize_ = newBinXSize_;
+         binYSize_ = newBinYSize_;
       }
-      binSize_ = newBinSize_;
-      binXSize_ = newBinXSize_;
-      binYSize_ = newBinYSize_;
+
+      if (rgbaColor_ != newRgbaColor_)
+      {
+         rgbaColor_ = newRgbaColor_;
+      }
+
       // reconfigure anything that has to do with pl_exp_setup_cont
       int nRet = ResizeImageBufferContinuous();
       if ( nRet != DEVICE_OK )
       {
-          return nRet;
+         return nRet;
       }
       GetCoreCallback()->InitializeImageBuffer( 1, 1, GetImageWidth(), GetImageHeight(), GetImageBytesPerPixel() );
       GetCoreCallback()->PrepareForAcq(this);
@@ -3177,7 +3218,7 @@ int Universal::PushImageToMmCore(const unsigned char* pPixBuffer, Metadata* pMd 
          GetImageWidth(),
          GetImageHeight(),
          GetImageBytesPerPixel(),
-         pMd);
+         pMd); // Inserting the md causes crash in debug builds
    }
 
    return nRet;
@@ -3324,20 +3365,22 @@ void Universal::LogMMMessage(int lineNr, std::string message, bool debug) const 
 int Universal::OnColorMode(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    START_ONPROPERTY("Universal::OnColorMode", eAct);
-   int nRet = DEVICE_OK;
    if (eAct == MM::AfterSet)
    {
        string val;
        pProp->Get(val);
-       val.compare(g_Keyword_ON) == 0 ? rgbaColor_ = true : rgbaColor_ = false;
+       newRgbaColor_ = (val == g_Keyword_ON); // std::string compare
        sequenceModeReady_ = false;
        singleFrameModeReady_ = false;
    }
    else if (eAct == MM::BeforeGet)
    {
-      pProp->Set(rgbaColor_ ? g_Keyword_ON : g_Keyword_OFF);
+      if (!IsCapturing())
+        pProp->Set(newRgbaColor_ ? g_Keyword_ON : g_Keyword_OFF);
+      else
+        pProp->Set(rgbaColor_ ? g_Keyword_ON : g_Keyword_OFF);
    }
-   return nRet;
+   return DEVICE_OK;
 }
 
 int Universal::OnRedScale(MM::PropertyBase* pProp, MM::ActionType eAct)
@@ -3411,26 +3454,31 @@ int Universal::OnCFAmask(MM::PropertyBase* pProp, MM::ActionType eAct)
           case CFA_RGGB:
           pProp->Set(g_Keyword_RGGB);
           debayer_.SetOrderIndex(CFA_RGGB);
+          OnPropertyChanged(g_Keyword_CFAmask, g_Keyword_RGGB);
           break;
 
           case CFA_BGGR:
           pProp->Set(g_Keyword_BGGR);
           debayer_.SetOrderIndex(CFA_BGGR);
+          OnPropertyChanged(g_Keyword_CFAmask, g_Keyword_BGGR);
           break;
 
           case CFA_GRBG:
           pProp->Set(g_Keyword_GRBG);
           debayer_.SetOrderIndex(CFA_GRBG);
+          OnPropertyChanged(g_Keyword_CFAmask, g_Keyword_GRBG);
           break;
 
           case CFA_GBRG:
           pProp->Set(g_Keyword_GBRG);
           debayer_.SetOrderIndex(CFA_GBRG);
+          OnPropertyChanged(g_Keyword_CFAmask, g_Keyword_GBRG);
           break;
           
           default:
           pProp->Set(g_Keyword_RGGB);
           debayer_.SetOrderIndex(CFA_RGGB);
+          OnPropertyChanged(g_Keyword_CFAmask, g_Keyword_RGGB);
           break;
       }
       

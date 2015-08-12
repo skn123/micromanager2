@@ -38,6 +38,7 @@
 #include "FloatProperty.h"
 #include "AOIProperty.h"
 #include "BooleanProperty.h"
+#include "ExposureProperty.h"
 
 #ifdef _WINDOWS
 #include "atunpacker.h"
@@ -548,6 +549,10 @@ int CAndorSDK3Camera::Initialize()
                                                        cameraDevice->GetBool(L"SpuriousNoiseFilter"),
                                                        callbackManager_, false);
 
+   staticBlemishCorrection_property = new TBooleanProperty(TAndorSDK3Strings::STATIC_BLEMISH_CORRECTION,
+                                                       cameraDevice->GetBool(L"StaticBlemishCorrection"),
+                                                       callbackManager_, false);
+
    sensorCooling_property = new TBooleanProperty(TAndorSDK3Strings::SENSOR_COOLING, 
                                                  cameraDevice->GetBool(L"SensorCooling"), callbackManager_, false);
 
@@ -572,7 +577,7 @@ int CAndorSDK3Camera::Initialize()
    overlap_property = new TBooleanProperty(TAndorSDK3Strings::OVERLAP, cameraDevice->GetBool(L"Overlap"),
                                            callbackManager_, false);
 
-   exposureTime_property = new TFloatProperty(MM::g_Keyword_Exposure,
+   exposureTime_property = new TExposureProperty(MM::g_Keyword_Exposure,
                                        new TAndorFloatValueMapper(cameraDevice->GetFloat(L"ExposureTime"), 1000),
                                        callbackManager_, false, false);
    
@@ -585,6 +590,12 @@ int CAndorSDK3Camera::Initialize()
    //Aux TTL
    auxOutSignal_property = new TEnumProperty(TAndorSDK3Strings::AUX_SOURCE, 
                                              cameraDevice->GetEnum(L"AuxiliaryOutSource"), 
+                                             this, thd_, snapShotController_, false, false);
+   auxOutTwoSignal_property = new TEnumProperty(TAndorSDK3Strings::AUX_SOURCE_TWO, 
+                                             cameraDevice->GetEnum(L"AuxOutSourceTwo"), 
+                                             this, thd_, snapShotController_, false, false);
+   shutterOutputMode_property = new TEnumProperty("ShutterOutputMode", 
+                                             cameraDevice->GetEnum(L"ShutterOutputMode"), 
                                              this, thd_, snapShotController_, false, false);
 
    LSPSensorReadoutMode_property = new TEnumProperty("LightScanPlus-SensorReadoutMode", 
@@ -609,6 +620,10 @@ int CAndorSDK3Camera::Initialize()
 
    LSPRowReadTime_property = new TFloatProperty("LightScanPlus-RowReadTime", 
                                              cameraDevice->GetFloat(L"RowReadTime"),  
+                                             callbackManager_, false, false);
+
+   LSPExternalTriggerDelay_Property = new TFloatProperty("LightScanPlus-ExternalTriggerDelay [s]", 
+                                             cameraDevice->GetFloat(L"ExternalTriggerDelay"), 
                                              callbackManager_, false, false);
 
    char errorStr[MM::MaxStrLength];
@@ -671,6 +686,7 @@ int CAndorSDK3Camera::Shutdown()
       delete temperatureControl_property;
       delete pixelReadoutRate_property;
       delete pixelEncoding_property;
+
       delete accumulationLength_property;
       delete readTemperature_property;
       delete temperatureStatus_property;
@@ -681,17 +697,20 @@ int CAndorSDK3Camera::Shutdown()
       delete frameRateLimits_property;
       delete fanSpeed_property;
       delete spuriousNoiseFilter_property;
+	  delete staticBlemishCorrection_property;
       delete aoi_property_;
       delete triggerMode_property;
       delete exposureTime_property;
       delete auxOutSignal_property;
+      delete auxOutTwoSignal_property;
+      delete shutterOutputMode_property;
       delete LSPSensorReadoutMode_property;
       delete LSPSequentialPortReadoutMode_property;
       delete LSPExposedPixelHeight_property;
       delete LSPScanSpeedControlEnable_property;
       delete LSPLineScanSpeed_property;
       delete LSPRowReadTime_property;
-
+      delete LSPExternalTriggerDelay_Property;
 
       delete callbackManager_;
       delete snapShotController_;

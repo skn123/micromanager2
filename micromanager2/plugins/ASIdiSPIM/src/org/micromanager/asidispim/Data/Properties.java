@@ -76,6 +76,7 @@ public class Properties {
       SPIM_NUM_REPEATS("SPIMNumRepeats"),
       SPIM_DELAY_REPEATS("SPIMDelayBeforeRepeat(ms)"),
       SPIM_NUM_SCANSPERSLICE("SPIMNumScansPerSlice"),
+      SPIM_INTERLEAVE_SIDES("SPIMInterleaveSidesEnable"),
       SPIM_NUM_SLICES_PER_PIEZO("SPIMNumSlicesPerPiezo"),
       SPIM_LINESCAN_PERIOD("SingleAxisXPeriod(ms)"),
       SPIM_DELAY_SIDE("SPIMDelayBeforeSide(ms)"),
@@ -131,16 +132,17 @@ public class Properties {
       STAGESCAN_FAST_STOP("ScanFastAxisStopPosition(mm)"),
       STAGESCAN_SLOW_START("ScanSlowAxisStartPosition(mm)"),
       STAGESCAN_SLOW_STOP("ScanSlowAxisStopPosition(mm)"),
-      STAGESCAN_OVERSHOOT_FACTOR("ScanOvershootFactor"),
+      STAGESCAN_SETTLING_TIME("ScanSettlingTime(ms)"),
       STAGESCAN_MOTOR_SPEED("MotorSpeedX-S(mm/s)"),
       STAGESCAN_MOTOR_ACCEL("AccelerationX-AC(ms)"),
+      BINNING("Binning"),
       TRIGGER_SOURCE("TRIGGER SOURCE"),   // for Hamamatsu
       TRIGGER_POLARITY("TriggerPolarity"),// for Hamamatsu
       TRIGGER_ACTIVE("TRIGGER ACTIVE"),   // for Hamamatsu
       READOUTTIME("ReadoutTime"),         // for Hamamatsu
       SENSOR_MODE("SENSOR MODE"),         // for Hamamatsu
       SCAN_MODE("ScanMode"),              // for Hamamatsu, 1 = slow scan, 2 = fast scan
-      TRIGGER_MODE_PCO("Triggermode"),        // for PCO
+      TRIGGER_MODE_PCO("Triggermode"),         // for PCO
       PIXEL_RATE("PixelRate"),                 // for PCO
       CAMERA_TYPE("CameraType"),               // for PCO
       TRIGGER_MODE("TriggerMode"),             // for Andor Zyla
@@ -148,6 +150,8 @@ public class Properties {
       PIXEL_READOUT_RATE("PixelReadoutRate"),  // for Andor Zyla
       ANDOR_OVERLAP("Overlap"),                // for Andor Zyla
       PIXEL_TYPE("PixelType"),            // for DemoCam
+      CAMERA_SIZE_X("OnCameraCCDXSize"),  // for DemoCam
+      CAMERA_SIZE_Y("OnCameraCCDYSize"),  // for DemoCam
       FIRMWARE_VERSION("FirmwareVersion"),
       CAMERA("Camera"),
       PLUGIN_POSITION_REFRESH_INTERVAL("PositionRefreshInterval(s)"),
@@ -180,6 +184,7 @@ public class Properties {
       PLUGIN_DESIRED_SLICE_PERIOD("DesiredSlicePeriod"),
       PREFS_MINIMIZE_SLICE_PERIOD("MinimizeSlicePeriod"),
       PLUGIN_ACQUSITION_MODE("AcquisitionMode"),
+      PLUGIN_ACQUSITION_USE_AUTOFOCUS("UseAutofocusInAcquisition"),
       PLUGIN_CAMERA_MODE("CameraMode"),
       PREFS_ENABLE_POSITION_UPDATES("EnablePositionUpdates"),
       PREFS_ENABLE_ILLUM_PIEZO_HOME("EnableIllumPiezoHome"),
@@ -190,9 +195,19 @@ public class Properties {
       PLUGIN_MULTICHANNEL_MODE("MultiChannelMode"),
       PREFS_USE_MULTIPOSITION("MultiPositionMode"),
       PREFS_USE_TIMEPOINTS("UseTimePoints"),
-      PLUGIN_AUTOFOCUS_DEBUG("DebugMode"),
+      PLUGIN_AUTOFOCUS_SHOWIMAGES("AutofocusShowImages"),
+      PLUGIN_AUTOFOCUS_SHOWPLOT("AutofocusShowPlot"),
       PLUGIN_AUTOFOCUS_NRIMAGES("AutofocusNrImages"),
-      PLUGIN_AUTOFOCUS_STEPSIZE("AutofocusStepSize")
+      PLUGIN_AUTOFOCUS_STEPSIZE("AutofocusStepSize"),
+      PLUGIN_AUTOFOCUS_WINDOWPOSX("AutofocusWindowPosx"),
+      PLUGIN_AUTOFOCUS_WINDOWPOSY("AutofocusWindowPosy"),
+      PLUGIN_AUTOFOCUS_WINDOW_WIDTH("AutofocusWindowWidth"),
+      PLUGIN_AUTOFOCUS_WINDOW_HEIGHT("AutofocusWIndowHeight"),
+      PLUGIN_AUTOFOCUS_ACQBEFORESTART("AutofocusDoBeforeACQStart"),
+      PLUGIN_AUTOFOCUS_EACHNIMAGES("AutofocusEachNTimePoints"),
+      PLUGIN_AUTOFOCUS_CHANNEL("AutofocusChannel"),
+      PLUGIN_AUTOFOCUS_MINIMUMR2("AutofocusMinimumR2"),
+      PLUGIN_ADVANCED_CAMERA_EXPOSURE("AdvancedCameraExposure")
       ;
       private final String text;
       private final boolean hasPattern;  // true if string has substitution pattern
@@ -247,7 +262,8 @@ public class Properties {
       PLOGIC_PRESET_COUNT_3("16 - mod3 counter"),
       PLOGIC_PRESET_COUNT_4("15 - mod4 counter"),
       PLOGIC_PRESET_CLOCK_LASER("17 - counter clock = falling TTL1"),
-      PLOGIC_PRESET_CLOCK_SIDE("18 - counter clock = falling TTL3"),
+      PLOGIC_PRESET_CLOCK_SIDE_AFIRST("18 - counter clock = falling TTL3"),
+      PLOGIC_PRESET_CLOCK_SIDE_BFIRST("26 - counter clock = rising TTL3"),
       PLOGIC_PRESET_BNC5_8_ON_13_16("20 - cells 13-16 on BNC5-8"),
       PLOGIC_CHANNEL_BNC5("output 5 only"),
       PLOGIC_CHANNEL_BNC6("output 6 only"),
@@ -305,8 +321,7 @@ public class Properties {
    /**
     * sees if property exists in given device
     * @param device enum key for device 
-    * @param name enum key for property 
-    * @param ignoreError false (default) will do error checking, true means ignores non-existing property
+    * @param name enum key for property
     * @param propNameSubstitute string to substitute for pattern in property name, or null if not used
     * @return
     */
@@ -624,12 +639,11 @@ public class Properties {
     */
    private String getPropValue(Devices.Keys device, Properties.Keys name,
          String propNameSubstitute) {
-      String val = "";
+      String val;
       if (device == Devices.Keys.PLUGIN) {
          val = prefs_.getString(PLUGIN_PREF_NODE, name, "");
       } else {
-         String mmDevice = null;
-         mmDevice = devices_.getMMDevice(device);
+         String mmDevice = devices_.getMMDevice(device);
          val = "";  // set to be empty string to avoid null pointer exceptions
          if (mmDevice != null) {
             try {

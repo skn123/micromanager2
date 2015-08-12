@@ -251,6 +251,8 @@ public class JavaUtils {
          prefs.flush();
       } catch (BackingStoreException e) {
          return false;
+      } catch (java.lang.SecurityException e) {
+         return false;
       }
       return true;
    }
@@ -476,10 +478,10 @@ public class JavaUtils {
       }
       if (isWindows()) {
          String os = System.getProperty("os.name").toLowerCase();
-         if (os.indexOf("xp") >= 0) {
-            return System.getenv("USERPROFILE") + "/Local Settings/Application Data/Micro-Manager/";
-         } else if ((os.indexOf("windows 7") >= 0) || (os.indexOf("windows vista") >= 0)) {
-            return System.getenv("USERPROFILE") + "/AppData/Local/Micro-Manager/";
+         if (os.contains("xp")) {
+            return System.getenv("APPDATA") + "/Micro-Manager/";
+         } else { // Assume Vista or newer.
+            return System.getenv("LOCALAPPDATA") + "/Micro-Manager/";
          }
       }
       if (isUnix()) {

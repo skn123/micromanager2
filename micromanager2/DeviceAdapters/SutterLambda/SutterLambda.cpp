@@ -16,7 +16,7 @@
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-// CVS:           $Id: SutterLambda.cpp 13439 2014-05-15 05:48:19Z mark $
+// CVS:           $Id: SutterLambda.cpp 15568 2015-06-30 00:17:16Z nico $
 //
 
 #ifdef WIN32
@@ -554,6 +554,10 @@ answerTimeoutMs_(500)
    CPropertyAction* pAct = new CPropertyAction (this, &Wheel::OnPort);
    CreateProperty(MM::g_Keyword_Port, "Undefined", MM::String, false, pAct, true);
 
+   // Answertimeout
+   pAct = new CPropertyAction (this, &Wheel::OnAnswerTimeout);
+   CreateProperty("Timeout(ms)", "500", MM::Integer, false, pAct, true);
+
    UpdateStatus();
 }
 
@@ -856,6 +860,19 @@ int Wheel::OnBusy(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
+int Wheel::OnAnswerTimeout(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::BeforeGet)
+   {
+      pProp->Set(answerTimeoutMs_);
+   }
+   else if (eAct == MM::AfterSet)
+   {
+      pProp->Get(answerTimeoutMs_);
+   }
+
+   return DEVICE_OK;
+}
 ///////////////////////////////////////////////////////////////////////////////
 // Shutter implementation
 // ~~~~~~~~~~~~~~~~~~~~~~~

@@ -261,7 +261,7 @@ int CXYStage::Initialize()
    AddAllowedValue(g_JoystickEnabledPropertyName, g_YesState);
    UpdateProperty(g_JoystickEnabledPropertyName);
 
-   if (firmwareVersion_ > 2.865)  // changed behavior of JS F and T as of v2.87
+   if (FirmwareVersionAtLeast(2.87))  // changed behavior of JS F and T as of v2.87
    {
       // fast wheel speed (JS F) (per-card, not per-axis)
       pAct = new CPropertyAction (this, &CXYStage::OnWheelFastSpeed);
@@ -354,10 +354,10 @@ int CXYStage::Initialize()
       SetPropertyLimits(g_ScanNumLinesPropertyName, 1, 100);  // upper limit is arbitrary, have limits to enforce > 0
       UpdateProperty(g_ScanNumLinesPropertyName);
 
-      pAct = new CPropertyAction (this, &CXYStage::OnScanOvershootFactor);
-      CreateProperty(g_ScanOvershootFactorPropertyName, "1", MM::Float, false, pAct);
-      SetPropertyLimits(g_ScanOvershootFactorPropertyName, 0., 5.);  // limits are arbitrary really, just give a reasonable range
-      UpdateProperty(g_ScanOvershootFactorPropertyName);
+      pAct = new CPropertyAction (this, &CXYStage::OnScanSettlingTime);
+      CreateProperty(g_ScanSettlingTimePropertyName, "1", MM::Float, false, pAct);
+      SetPropertyLimits(g_ScanSettlingTimePropertyName, 0., 500.);  // limits are arbitrary really, just give a reasonable range
+      UpdateProperty(g_ScanSettlingTimePropertyName);
 
    }
 
@@ -468,7 +468,7 @@ int CXYStage::Stop()
 bool CXYStage::Busy()
 {
    ostringstream command; command.str("");
-   if (firmwareVersion_ > 2.7) // can use more accurate RS <axis>?
+   if (FirmwareVersionAtLeast(2.7)) // can use more accurate RS <axis>?
    {
       command << "RS " << axisLetterX_ << "?";
       if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // say we aren't busy if we can't communicate
@@ -507,7 +507,21 @@ bool CXYStage::Busy()
 int CXYStage::SetOrigin()
 {
    ostringstream command; command.str("");
-   command << "H " << axisLetterX_ << "=" << 0 << " " << axisLetterY_ << "=" << 0;
+   command << "H " << axisLetterX_ << "=0 " << axisLetterY_ << "=0";
+   return hub_->QueryCommandVerify(command.str(),":A");
+}
+
+int CXYStage::SetXOrigin()
+{
+   ostringstream command; command.str("");
+   command << "H " << axisLetterX_ << "=0 ";
+   return hub_->QueryCommandVerify(command.str(),":A");
+}
+
+int CXYStage::SetYOrigin()
+{
+   ostringstream command; command.str("");
+   command << "H " << axisLetterY_ << "=0";
    return hub_->QueryCommandVerify(command.str(),":A");
 }
 
@@ -520,7 +534,7 @@ int CXYStage::Home()
 
 int CXYStage::SetHome()
 {
-   if (firmwareVersion_ > 2.7) {
+   if (FirmwareVersionAtLeast(2.7)) {
       ostringstream command; command.str("");
       command << "HM " << axisLetterX_ << "+" << " " << axisLetterY_ << "+";
       return hub_->QueryCommandVerify(command.str(),":A");
@@ -1769,7 +1783,7 @@ int CXYStage::OnScanNumLines(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
-int CXYStage::OnScanOvershootFactor(MM::PropertyBase* pProp, MM::ActionType eAct)
+int CXYStage::OnScanSettlingTime(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    ostringstream command; command.str("");
    double tmp = 0;

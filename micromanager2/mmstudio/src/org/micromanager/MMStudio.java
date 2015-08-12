@@ -206,6 +206,7 @@ public class MMStudio implements ScriptInterface {
    private final Object shutdownLock_ = new Object();
 
    private final JMenuBar menuBar_;
+   private final FileMenu fileMenu_;
    private JCheckBoxMenuItem centerAndDragMenuItem_;
    public static final FileType MM_DATA_SET 
            = new FileType("MM_DATA_SET",
@@ -362,8 +363,8 @@ public class MMStudio implements ScriptInterface {
 
       frame_.setJMenuBar(menuBar_);
 
-      FileMenu fileMenu = new FileMenu(studio_);
-      fileMenu.initializeFileMenu(menuBar_);
+      fileMenu_ = new FileMenu(studio_);
+      fileMenu_.initializeFileMenu(menuBar_);
 
       toolsMenu_ = new ToolsMenu(studio_, core_, options_);
       toolsMenu_.initializeToolsMenu(menuBar_, mainPrefs_);
@@ -422,7 +423,7 @@ public class MMStudio implements ScriptInterface {
 
       frame_.paintToFront();
       
-            engine_.setCore(core_, afMgr_);
+      engine_.setCore(core_, afMgr_);
       posList_ = new PositionList();
       engine_.setPositionList(posList_);
       // load (but do no show) the scriptPanel
@@ -612,14 +613,16 @@ public class MMStudio implements ScriptInterface {
     * the rawImageQueue.
     * @param rawImageQueue
     * @param displayImageRoutine
+    * @return the display thread, which can be joined to ensure all images
+    * have been processed.
     */
-   public void runDisplayThread(BlockingQueue<TaggedImage> rawImageQueue, 
+   public Thread runDisplayThread(BlockingQueue<TaggedImage> rawImageQueue, 
             final DisplayImageRoutine displayImageRoutine) {
       final BlockingQueue<TaggedImage> processedImageQueue = 
             ProcessorStack.run(rawImageQueue, 
             getAcquisitionEngine().getImageProcessors());
-        
-      new Thread("Display thread") {
+
+      final Thread displayThread = new Thread("Display thread") {
        @Override
          public void run() {
             try {
@@ -634,7 +637,9 @@ public class MMStudio implements ScriptInterface {
                ReportingUtils.logError(ex);
             }
          }
-      }.start();
+      };
+      displayThread.start();
+      return displayThread;
    }
 
    public interface DisplayImageRoutine {
@@ -983,13 +988,15 @@ public class MMStudio implements ScriptInterface {
    @Override
    public String openAcquisitionData(String dir, boolean inRAM, boolean show) 
            throws MMScriptException {
-      String rootDir = new File(dir).getAbsolutePath();
-      String name = new File(dir).getName();
+      File f = new File(dir);
+      String rootDir = f.getAbsolutePath();
+      String name = f.getName();
       rootDir = rootDir.substring(0, rootDir.length() - (name.length() + 1));
       name = acqMgr_.getUniqueAcquisitionName(name);
       acqMgr_.openAcquisition(name, rootDir, show, !inRAM, true);
       try {
          getAcquisition(name).initialize();
+         fileMenu_.addFileToRecentlyOpenedMenu(f);
       } catch (MMScriptException mex) {
          acqMgr_.closeAcquisition(name);
          throw (mex);
@@ -1121,7 +1128,6 @@ public class MMStudio implements ScriptInterface {
       if (posListDlg_ == null) {
          posListDlg_ = new PositionListDlg(core_, studio_, posList_, 
                  acqControlWin_,options_);
-         GUIUtils.recallPosition(posListDlg_);
          posListDlg_.setBackground(getBackgroundColor());
          studio_.addMMBackgroundListener(posListDlg_);
          posListDlg_.addListeners();
@@ -2794,6 +2800,11 @@ public class MMStudio implements ScriptInterface {
    @Override
    public void registerForEvents(Object obj) {
       EventManager.register(obj);
+   }
+   
+   @Override
+   public void unregisterForEvents(Object obj) {
+      EventManager.unregister(obj);
    }
 
    @Override

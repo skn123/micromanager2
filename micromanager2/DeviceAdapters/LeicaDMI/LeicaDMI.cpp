@@ -910,6 +910,14 @@ bool ILTurret::Busy()
    if (ret != DEVICE_OK)  // This is bad and should not happen
       return false;
 
+   if (busy)
+      return true;
+
+   // We may have switched the Method, so we need to wait for it, too.
+   ret = g_ScopeModel.method_.GetBusy(busy);
+   if (ret != DEVICE_OK)
+      return false;
+
    return busy;
 }
 
@@ -954,6 +962,17 @@ int ILTurret::OnState(MM::PropertyBase* pProp, MM::ActionType eAct)
                }
                if (g_ScopeModel.ILTurret_.cube_[pos].IsMethodAvailable(i))
                   g_ScopeInterface.SetMethod(*this, *GetCoreCallback(), i);
+
+               // Now, although not ideal, we need to wait for the Method
+               // switch to complete before we set the turret position.
+               // Otherwise, the turret position command can get overridden by
+               // the turret movement that is part of the method switch. As
+               // observed on a DMi8.
+               bool busy = true;
+               while (busy) {
+                  g_ScopeModel.method_.GetBusy(busy);
+                  CDeviceUtils::SleepMs(20);
+               }
             }
          }
          return g_ScopeInterface.SetILTurretPosition(*this, *GetCoreCallback(), pos);

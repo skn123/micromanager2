@@ -52,14 +52,13 @@ import org.micromanager.utils.MMFrame;
 
 //TODO devices tab automatically recognize default device names
 //TODO "swap sides" button (during alignment)
-//TODO setup tab have button for piezo/scanner go to 0 (eliminate calibration position display)
 //TODO alignment wizard that would guide through alignment steps
 //TODO easy mode that pulls most-used bits from all panels
-//TODO autofocus for finding calibration endpoints (http://dx.doi.org/10.1364/OE.16.008670, FFT method, or other)
 //TODO calibration for sheet width/offset (automatic based on image analysis?) and then optimize based on ROI
 //TODO recalculate slice timing automatically changing assigned camera
 //TODO add status bar to bottom of window (would include acquisition status, could show other messages too)
 //TODO move acquisition start/stop to shared area below tabs
+//TODO add ability of stage scan in 2nd dimension (for wide samples)
 //TODO make it easy to discard a data set
 //TODO make it easy to look through series of data sets
 //TODO hardware Z-projection
@@ -70,8 +69,9 @@ import org.micromanager.utils.MMFrame;
 //TODO cleanup prefs vs. props... maybe add boolean support for plugin device use only?
 //TODO finish eliminating Prefs.Keys in favor of Properties.Keys with plugin values
 //TODO save/load plugin settings from file instead of from registry (nice to also include controller settings)
-//TODO handle camera binning
+//TODO improve efficiency of camera code by pre-calculating key factors and updating when needed instead of calculating every time
 //TODO add check for correct Hamamatsu model
+//TODO execute autofocus during acquisition before the desired time point is reached instead of waiting until a timepoint should be collected
 
 
 /**
@@ -120,7 +120,7 @@ public class ASIdiSPIMFrame extends MMFrame
       positions_ = new Positions(gui, devices_);
       joystick_ = new Joystick(devices_, props_);
       cameras_ = new Cameras(gui, devices_, props_, prefs_);
-      controller_ = new ControllerUtils(gui, props_, prefs_, devices_);
+      controller_ = new ControllerUtils(gui, props_, prefs_, devices_, positions_);
       
       // create the panels themselves
       // in some cases dependencies create required ordering
@@ -142,7 +142,7 @@ public class ASIdiSPIMFrame extends MMFrame
             positions_, prefs_, cameras_, stagePosUpdater_);
 
       dataAnalysisPanel_ = new DataAnalysisPanel(gui, prefs_);
-      autofocusPanel_ = new AutofocusPanel(devices_, props_, prefs_, autofocus_);
+      autofocusPanel_ = new AutofocusPanel(gui, devices_, props_, prefs_, autofocus_);
       settingsPanel_ = new SettingsPanel(devices_, props_, prefs_, stagePosUpdater_);
       stagePosUpdater_.oneTimeUpdate();  // needed for NavigationPanel
       helpPanel_ = new HelpPanel();
@@ -235,10 +235,27 @@ public class ASIdiSPIMFrame extends MMFrame
     * For use of acquisition panel code (getting joystick settings)
     * Do not get into the internals of this plugin without relying on
     * ASIdiSPIM.api
-    * @return 
+    * @return the currently used instance of the NavigationPanel;
     */
    public NavigationPanel getNavigationPanel() {
       return navigationPanel_;
+   }
+   
+   /**
+    * For use by the acquisition panel code (to update offset setting)
+    * Do not get into the internals of this plugin without relying on
+    * ASIdiSPIM.api
+    * @param side side for which the setup panel is desired)
+    * @return desired instance of the setup Panel (either A or B)
+    */
+   public SetupPanel getSetupPanel(Devices.Sides side) {
+      if (side.equals(Devices.Sides.A))
+         return setupPanelA_;
+      else if (side.equals(Devices.Sides.B))
+         return setupPanelB_;
+      
+      // this can not be reached unless someone adds more sides than A and B
+      return null;
    }
    
    // MMListener mandated member functions
@@ -281,6 +298,7 @@ public class ASIdiSPIMFrame extends MMFrame
    public void slmExposureChanged(String cameraName, double newExposureTime) {
    }
    
+   // TODO make this automatically call all panels' method
    private void saveSettings() {
       // save selections as needed
       devices_.saveSettings();
@@ -294,11 +312,18 @@ public class ASIdiSPIMFrame extends MMFrame
       prefs_.putInt(MAIN_PREF_NODE, Prefs.Keys.TAB_INDEX, tabbedPane_.getSelectedIndex());
    }
    
+// TODO make this automatically call all panels' method
+   private void windowClosing() {
+      acquisitionPanel_.windowClosing();
+      setupPanelA_.windowClosing();
+      setupPanelB_.windowClosing();
+   }
+   
    @Override
    public void dispose() {
       stagePosUpdater_.stop();
       saveSettings();
-      acquisitionPanel_.windowClosing();
+      windowClosing();
       super.dispose();
    }
 }

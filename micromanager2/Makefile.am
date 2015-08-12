@@ -9,6 +9,10 @@ fetchdeps:
 
 endif
 
+if BUILD_CPP_TESTS
+TESTING_DIR = testing
+endif
+
 if BUILD_MMCORE
 MMCORE_DIR = MMCore
 endif
@@ -97,15 +101,22 @@ endif # BUILD_JAVA_APP
 
 if INSTALL_DEPENDENCY_JARS
 
+if INSTALL_AS_IMAGEJ_PLUGIN
+# When installing into existing ImageJ, don't install ij.jar
+DEPENDENCY_JAR_CONFS=compile,runtime
+else
+DEPENDENCY_JAR_CONFS=compile,imagej,runtime
+endif
+
 install-data-local:
 	$(INSTALL) -d $(DESTDIR)$(jardir)
-	@for jar in $(CLASSEXT)/*.jar; do \
+	@for jar in $(srcdir)/dependencies/artifacts/{$(DEPENDENCY_JAR_CONFS)}/*.jar; do \
 		echo $(INSTALL_DATA) -c $$jar $(DESTDIR)$(jardir); \
 		$(INSTALL_DATA) -c $$jar $(DESTDIR)$(jardir); \
 	done
 
 uninstall-local:
-	@for jar in $(CLASSEXT)/*.jar; do \
+	@for jar in $(srcdir)/dependencies/artifacts/{$(DEPENDENCY_JAR_CONFS)}/*.jar; do \
 		echo rm -f $(DESTDIR)$(jardir)/`basename $$jar`; \
 		rm -f $(DESTDIR)$(jardir)/`basename $$jar`; \
 	done
@@ -119,7 +130,7 @@ CLEANFILES = $(launcher_SCRIPTS)
 # TODO: Building of DeviceAdapters could be made optional.
 SUBDIRS = \
 	$(ANTEXTENSIONS) \
-	testing \
+	$(TESTING_DIR) \
 	MMDevice \
 	$(MMCORE_DIR) \
 	$(MMCOREJ_DIR) \

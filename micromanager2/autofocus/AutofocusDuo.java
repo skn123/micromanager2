@@ -31,6 +31,7 @@ import org.micromanager.api.ScriptInterface;
 import org.micromanager.utils.AutofocusBase;
 import org.micromanager.utils.MMException;
 import org.micromanager.utils.PropertyItem;
+import org.micromanager.utils.ReportingUtils;
 
 /**
  * ImageJ plugin wrapper for uManager.
@@ -47,6 +48,7 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
    
    private static final String AF_DEVICE_NAME = "Duo";
 
+   private ScriptInterface app_;
    private CMMCore core_;
 
    private boolean verbose_ = true; // displaying debug info or not
@@ -68,31 +70,28 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
       applySettings();
    }
    
+   @Override
    public final void applySettings() {
       try {
          autoFocus1_ = getPropertyValue(KEY_AUTOFOCUS1);
          autoFocus2_ = getPropertyValue(KEY_AUTOFOCUS2);
       } catch (MMException e) {
-         // TODO Auto-generated catch block
-         e.printStackTrace();
+         ReportingUtils.logError(e);
       }
       
    }
 
    public void run(String arg) {
 
-      if (arg.compareTo("silent") == 0)
-         verbose_ = false;
-      else
-         verbose_ = true;
+      verbose_ = arg.compareTo("silent") != 0;
 
       if (arg.compareTo("options") == 0){
-         MMStudioPlugin.getAutofocusManager().showOptionsDialog();
+         app_.getAutofocusManager().showOptionsDialog();
       }  
 
       if (core_ == null) {
          // if core object is not set attempt to get its global handle
-         core_ = MMStudioPlugin.getMMCoreInstance();
+         core_ = app_.getMMCore();
       }
 
       if (core_ == null) {
@@ -106,14 +105,14 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
 
       try{
          if (autoFocus1_ != null) {
-            MMStudioPlugin.getAutofocusManager().selectDevice(autoFocus1_);
-            MMStudioPlugin.getAutofocusManager().getDevice().fullFocus();
+            app_.getAutofocusManager().selectDevice(autoFocus1_);
+            app_.getAutofocusManager().getDevice().fullFocus();
          }
          if (autoFocus2_ != null) {
-            MMStudioPlugin.getAutofocusManager().selectDevice(autoFocus2_);
-            MMStudioPlugin.getAutofocusManager().getDevice().fullFocus();
+            app_.getAutofocusManager().selectDevice(autoFocus2_);
+            app_.getAutofocusManager().getDevice().fullFocus();
          }
-         MMStudioPlugin.getAutofocusManager().selectDevice(AF_DEVICE_NAME);
+         app_.getAutofocusManager().selectDevice(AF_DEVICE_NAME);
       }
       catch(Exception e)
       {
@@ -123,20 +122,24 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
    }
 
 
+   @Override
    public double fullFocus() {
       run("silent");
       return 0;
    }
 
+   @Override
    public String getVerboseStatus() {
       return "OK";
    }
 
+   @Override
    public double incrementalFocus() {
       run("silent");
       return 0;
    }
 
+   @Override
    public void focus(double coarseStep, int numCoarse, double fineStep, int numFine) {
       run("silent");
    }
@@ -145,7 +148,7 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
    public PropertyItem[] getProperties() {
       // use default dialog
             
-      String afDevices[] = MMStudioPlugin.getAutofocusManager().getAfDevices();
+      String afDevices[] = app_.getAutofocusManager().getAfDevices();
       String allowedAfDevices[] = new String[afDevices.length - 1];
 
       try {
@@ -154,14 +157,16 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
          boolean found1 = false;
          boolean found2 = false;
          int j =0;
-         for (int i=0; i<afDevices.length; i++) {
-            if (!afDevices[i].equals(AF_DEVICE_NAME)) {
-               allowedAfDevices[j] = afDevices[i];
+         for (String afDevice : afDevices) {
+            if (!afDevice.equals(AF_DEVICE_NAME)) {
+               allowedAfDevices[j] = afDevice;
                j++;
-               if (afDevices[i].equals(autoFocus1_))
+               if (afDevice.equals(autoFocus1_)) {
                   found1 = true;
-               if (afDevices[i].equals(autoFocus2_))
+               }
+               if (afDevice.equals(autoFocus2_)) {
                   found2 = true;
+               }
             }
          }
          p1.allowed = allowedAfDevices;
@@ -180,25 +185,31 @@ public class AutofocusDuo extends AutofocusBase implements Autofocus  {
       return super.getProperties();
    }
       
+   @Override
    public double computeScore(final ImageProcessor ip) {
       return 0.0;
    }
    
+   @Override
    public double getCurrentFocusScore() {
       // TODO Auto-generated method stub
       return 0;
    }
 
+   @Override
    public int getNumberOfImages() {
       // TODO Auto-generated method stub
       return 0;
    }
 
+   @Override
    public String getDeviceName() {
       return AF_DEVICE_NAME;
    }
    
+   @Override
    public void setApp(ScriptInterface app) {
+      app_ = app;
       core_ = app.getMMCore();
    }
 

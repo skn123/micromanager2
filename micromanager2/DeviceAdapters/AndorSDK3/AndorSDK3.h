@@ -49,6 +49,7 @@ namespace andor {
 class TEnumProperty;
 class TIntegerProperty;
 class TFloatProperty;
+class TExposureProperty;
 class TFloatStringProperty;
 class TBooleanProperty;
 class TAOIProperty;
@@ -180,11 +181,14 @@ private:
    TEnumProperty* triggerMode_property;
    TEnumProperty* fanSpeed_property;
    TBooleanProperty* spuriousNoiseFilter_property;
+   TBooleanProperty* staticBlemishCorrection_property;
    TBooleanProperty* rollingShutterGlobalClear_property;
-   TFloatProperty* exposureTime_property;
+   TExposureProperty* exposureTime_property;
    TFloatProperty* frameRate_property;
    TFloatStringProperty* frameRateLimits_property;
    TEnumProperty* auxOutSignal_property;
+   TEnumProperty* auxOutTwoSignal_property;
+   TEnumProperty* shutterOutputMode_property;
    
    // LightScanPlus properties
    TEnumProperty* LSPSensorReadoutMode_property;
@@ -193,6 +197,7 @@ private:
    TBooleanProperty* LSPScanSpeedControlEnable_property;
    TFloatProperty* LSPLineScanSpeed_property;
    TFloatProperty* LSPRowReadTime_property;
+   TFloatProperty* LSPExternalTriggerDelay_Property;
 
 
    // atcore++ objects

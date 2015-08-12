@@ -291,7 +291,7 @@ const char* const g_ScanFastAxisStopPositionPropertyName = "ScanFastAxisStopPosi
 const char* const g_ScanSlowAxisStartPositionPropertyName = "ScanSlowAxisStartPosition(mm)";
 const char* const g_ScanSlowAxisStopPositionPropertyName = "ScanSlowAxisStopPosition(mm)";
 const char* const g_ScanNumLinesPropertyName = "ScanNumLines";
-const char* const g_ScanOvershootFactorPropertyName = "ScanOvershootFactor";
+const char* const g_ScanSettlingTimePropertyName = "ScanSettlingTime(ms)";
 
 // CRISP property names
 const char* const g_CRISPWaitAfterLockPropertyName = "Wait ms after Lock";
@@ -311,6 +311,7 @@ const char* const g_RB_ModePropertyName = "RingBufferMode";
 const char* const g_RB_EnablePropertyName = "RingBufferEnable";
 const char* const g_RB_TriggerPropertyName = "RingBufferTrigger";
 const char* const g_RB_AutoplayRunningPropertyName = "RingBufferAutoplayRunning";
+const char* const g_UseSequencePropertyName = "UseSequence";
 
 // SPIM property names
 const char* const g_SPIMNumSlicesPropertyName = "SPIMNumSlices"; // used by both piezos and micromirror, would be more accurately named NumPiezoPositions because total number of slices is this times NumSlicesPerPiezo
@@ -320,6 +321,7 @@ const char* const g_SPIMNumSidesPropertyName = "SPIMNumSides";
 const char* const g_SPIMFirstSidePropertyName = "SPIMFirstSide";
 const char* const g_SPIMPiezoHomeEnable = "SPIMPiezoHomeEnable";
 const char* const g_SPIMScannerHomeEnable = "SPIMScannerHomeEnable";
+const char* const g_SPIMInterleaveSidesEnable = "SPIMInterleaveSidesEnable";
 const char* const g_SPIMNumRepeatsPropertyName = "SPIMNumRepeats";
 const char* const g_SPIMArmForTTLPropertyName = "SPIMArm";
 const char* const g_SPIMStatePropertyName = "SPIMState";
@@ -335,6 +337,10 @@ const char* const g_SPIMLaserDurationPropertyName = "SPIMLaserDuration(ms)";
 // SPIM laser TTL property names
 const char* const g_LaserOutputModePropertyName = "LaserOutputMode";
 const char* const g_LaserSwitchTimePropertyName = "LaserSwitchTime(ms)";
+
+// scanner phototargeting property names
+const char* const g_TargetExposureTimePropertyName = "TargetExposureTime(ms)";
+const char* const g_TargetSettlingTimePropertyName = "TargetSettlingTime(ms)";
 
 // LED property names
 const char* const g_LEDIntensityPropertyName = "LED Intensity(%)";
@@ -415,6 +421,10 @@ const char* const g_PresetCode19 = "19 - cells 9-16 on BNC1-8";
 const char* const g_PresetCode20 = "20 - cells 13-16 on BNC5-8";
 const char* const g_PresetCode21 = "21 - mod2 counter";
 const char* const g_PresetCode22 = "22 - no counter";
+const char* const g_PresetCode23 = "23 - TTL0-7 on BNC1-8";
+const char* const g_PresetCode24 = "24 - BNC3 source = cell 1";
+const char* const g_PresetCode25 = "25 - BNC3 source = cell 8";
+const char* const g_PresetCode26 = "26 - counter clock = rising TTL3";
 const char* const g_PLogicModeNone = "None";
 const char* const g_PLogicModediSPIMShutter = "diSPIM Shutter";
 const char* const g_ChannelNone = "none of outputs 5-8";
@@ -500,6 +510,7 @@ const char* const g_OnState = "On";
 // yes/no control settings
 const char* const g_YesState = "Yes";
 const char* const g_NoState = "No";
+const char* const g_OneTimeState = "One time";
 // shutter states
 const char* const g_OpenState = "Open";
 const char* const g_ClosedState = "Closed";

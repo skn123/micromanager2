@@ -74,6 +74,7 @@
 #define ERR_STREAM_MODE_NOT_SUPPORTED 10005
 #define ERR_CAMERA_NOT_FOUND          10006
 #define ERR_ROI_SIZE_NOT_SUPPORTED    10007
+#define ERR_BUFFER_TOO_LARGE          10008
 
 //////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -309,6 +310,7 @@ private:
    int selectedCFAmask_;
    int selectedInterpolationAlgorithm_;
    bool rgbaColor_;
+   bool newRgbaColor_; // Cached values, used when changing color mode during live mode
 
 #ifdef PVCAM_SMART_STREAMING_SUPPORTED
    double          smartStreamValuesDouble_[SMART_STREAM_MAX_EXPOSURES];

@@ -30,6 +30,7 @@ import javax.swing.DefaultComboBoxModel;
 import javax.swing.JComboBox;
 
 import org.micromanager.asidispim.Utils.DevicesListenerInterface;
+import org.micromanager.asidispim.Utils.MyDialogUtils;
 
 
 /**
@@ -40,7 +41,6 @@ import org.micromanager.asidispim.Utils.DevicesListenerInterface;
 public class AcquisitionModes {
    
    private final Devices devices_;   // object holding information about selected/available devices
-   private final Properties props_;  // object handling all property read/writes
    private final Prefs prefs_;
    
    /**
@@ -51,9 +51,9 @@ public class AcquisitionModes {
    public static enum Keys { 
       PIEZO_SLICE_SCAN("Synchronous piezo/slice scan", 1),
       SLICE_SCAN_ONLY( "Slice scan only (beam thickness)", 2),
-      NO_SCAN(         "No scan (vibration)", 3),
+      NO_SCAN(         "No scan (fixed sheet)", 3),
       STAGE_SCAN(      "Stage scan", 4),
-      STAGE_SCAN_INTERLEAVED("Stage scan interleaved", 5),  // TODO implement
+      STAGE_SCAN_INTERLEAVED("Stage scan interleaved", 5),
       NONE(            "None", 0);
       private final String text;
       private final int prefCode;
@@ -70,9 +70,8 @@ public class AcquisitionModes {
       }
    };
    
-   public AcquisitionModes(Devices devices, Properties props, Prefs prefs) {
+   public AcquisitionModes(Devices devices, Prefs prefs) {
       devices_ = devices;
-      props_ = props;
       prefs_ = prefs;
    }
    
@@ -146,14 +145,22 @@ public class AcquisitionModes {
          jcb_.setModel(cbModel);
          if (origItem != null) {
             jcb_.setSelectedItem(origItem);
+         } else {
+            // if existing selection isn't valid now then write new selection to prefs
+            MyDialogUtils.showError("For preference " + Properties.Keys.PLUGIN_ACQUSITION_MODE.toString()
+                  + " the previous selection \""
+                  + getKeyFromPrefCode(origCode) + "\" is not valid.  Changing to default.");
+            prefs_.putInt(MyStrings.PanelNames.ACQUSITION.toString(),
+                  Properties.Keys.PLUGIN_ACQUSITION_MODE, ((Keys)jcb_.getSelectedItem()).getPrefCode());
          }
       }//updateSelections
 
 
       /**
        * Returns whatever acquisition modes are available based on devices
-       * and installed firmware.  Will need to be expanded in the future
-       * (will use devices_ and props_)
+       * and installed firmware.  Can be expanded.
+       * Decided to show all options and decide later whether they are doable with the
+       * existing firmware/hardware, that way the end user at least knows such features exist 
        * @return
        */
       private List<Keys> getValidModeKeys() {
@@ -161,11 +168,8 @@ public class AcquisitionModes {
          keyList.add(Keys.PIEZO_SLICE_SCAN);
          keyList.add(Keys.SLICE_SCAN_ONLY);
          keyList.add(Keys.NO_SCAN);
-         if (devices_.isTigerDevice(Devices.Keys.XYSTAGE)
-               && props_.hasProperty(Devices.Keys.XYSTAGE, Properties.Keys.STAGESCAN_NUMLINES)) {
-            keyList.add(Keys.STAGE_SCAN);
-            keyList.add(Keys.STAGE_SCAN_INTERLEAVED);
-         }
+         keyList.add(Keys.STAGE_SCAN);
+         keyList.add(Keys.STAGE_SCAN_INTERLEAVED);
          return keyList;
       }
 

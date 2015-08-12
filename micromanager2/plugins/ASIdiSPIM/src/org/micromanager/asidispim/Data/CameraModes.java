@@ -30,6 +30,7 @@ import javax.swing.DefaultComboBoxModel;
 import javax.swing.JComboBox;
 
 import org.micromanager.asidispim.Utils.DevicesListenerInterface;
+import org.micromanager.asidispim.Utils.MyDialogUtils;
 
 
 /**
@@ -145,6 +146,15 @@ public class CameraModes {
          jcb_.setModel(cbModel);
          if (origItem != null) {
             jcb_.setSelectedItem(origItem);
+         } else {
+            // if existing selection isn't valid now then write new selection to prefs
+            MyDialogUtils.showError("For preference " + Properties.Keys.PLUGIN_CAMERA_MODE.toString()
+                  + " the previous selection \""
+                  + getKeyFromPrefCode(origCode) + "\" is not valid.  Changing to default.");
+            if (jcb_.getSelectedItem() != null) {
+               prefs_.putInt(MyStrings.PanelNames.SETTINGS.toString(),
+                  Properties.Keys.PLUGIN_CAMERA_MODE, ((Keys) jcb_.getSelectedItem()).getPrefCode());
+            }
          }
       }//updateSelections
       

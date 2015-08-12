@@ -37,7 +37,7 @@
 //
 // FUTURE DEVELOPMENT: From September 1 2007, the development of this adaptor is taken over by Andor Technology plc. Daigang Wen (d.wen@andor.com) is the main contact. Changes made by him will not be labeled.
 // LINUX DEVELOPMENT: From February 1, 2009, Linux compatibility was done by Karl Bellve at the Biomedical Imaging Group at the University of Massachusetts (Karl.Bellve@umassmed.edu)
-// CVS:           $Id: Andor.cpp 14645 2014-11-19 17:52:56Z matthew $
+// CVS:           $Id: Andor.cpp 15660 2015-08-11 10:49:06Z francis $
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1642,7 +1642,8 @@ int AndorCamera::GetListOfAvailableCameras()
 
          ActualInterval_ms_str_ += " (minimum)";
       }
-
+	  
+	  SetProperty(MM::g_Keyword_Exposure, CDeviceUtils::ConvertToString(fExposure));
       OnPropertyChanged(MM::g_Keyword_ReadoutTime, CDeviceUtils::ConvertToString(ReadoutTime_));
       OnPropertyChanged(g_Keyword_KeepCleanTime, CDeviceUtils::ConvertToString(KeepCleanTime_));
       OnPropertyChanged(MM::g_Keyword_ActualInterval_ms,ActualInterval_ms_str_.c_str());

@@ -84,13 +84,6 @@
 #   define MMCORE_DEPRECATED(prototype) prototype
 #endif
 
-#ifdef _MSC_VER
-  #ifdef MMCORE_EXPORTS
-  #define MMCORE_API __declspec(dllexport) 
-  #else
-  #define MMCORE_API __declspec(dllimport) 
-  #endif
-#endif
 
 class CPluginManager;
 class CircularBuffer;
@@ -131,7 +124,7 @@ typedef unsigned int* imgRGB32;
  * The signatures of most of the public member functions are designed to be
  * wrapped by SWIG with minimal manual configuration.
  */
-class MMCORE_API CMMCore
+class CMMCore
 {
    friend class CoreCallback;
    friend class CorePropertyCollection;
@@ -471,8 +464,11 @@ public:
    void setRelativePosition(double d) throw (CMMError);
    void setOrigin(const char* stageLabel) throw (CMMError);
    void setOrigin() throw (CMMError);
-   void setAdapterOrigin(const char* stageLabel, double d) throw (CMMError);
-   void setAdapterOrigin(double d) throw (CMMError);
+   void setAdapterOrigin(const char* stageLabel, double newZUm) throw (CMMError);
+   void setAdapterOrigin(double newZUm) throw (CMMError);
+
+   void setFocusDirection(const char* stageLabel, int sign);
+   int getFocusDirection(const char* stageLabel) throw (CMMError);
 
    bool isStageSequenceable(const char* stageLabel) throw (CMMError);
    void startStageSequence(const char* stageLabel) throw (CMMError);
@@ -497,13 +493,17 @@ public:
    double getYPosition(const char* xyStageLabel) throw (CMMError);
    double getXPosition() throw (CMMError);
    double getYPosition() throw (CMMError);
-   void stop(const char* xyStageLabel) throw (CMMError);
-   void home(const char* xyStageLabel) throw (CMMError);
+   void stop(const char* xyOrZStageLabel) throw (CMMError);
+   void home(const char* xyOrZStageLabel) throw (CMMError);
    void setOriginXY(const char* xyStageLabel) throw (CMMError);
    void setOriginXY() throw (CMMError);
+   void setOriginX(const char* xyStageLabel) throw (CMMError);
+   void setOriginX() throw (CMMError);
+   void setOriginY(const char* xyStageLabel) throw (CMMError);
+   void setOriginY() throw (CMMError);
    void setAdapterOriginXY(const char* xyStageLabel,
-         double x, double y) throw (CMMError);
-   void setAdapterOriginXY(double x, double y) throw (CMMError);
+         double newXUm, double newYUm) throw (CMMError);
+   void setAdapterOriginXY(double newXUm, double newYUm) throw (CMMError);
 
    bool isXYStageSequenceable(const char* xyStageLabel) throw (CMMError);
    void startXYStageSequence(const char* xyStageLabel) throw (CMMError);
@@ -580,7 +580,9 @@ public:
    void setGalvoIlluminationState(const char* galvoLabel, bool on)
       throw (CMMError);
    double getGalvoXRange(const char* galvoLabel) throw (CMMError);
+   double getGalvoXMinimum(const char* galvoLabel) throw (CMMError);
    double getGalvoYRange(const char* galvoLabel) throw (CMMError);
+   double getGalvoYMinimum(const char* galvoLabel) throw (CMMError);
    void addGalvoPolygonVertex(const char* galvoLabel, int polygonIndex,
          double x, double y) throw (CMMError);
    void deleteGalvoPolygons(const char* galvoLabel) throw (CMMError);

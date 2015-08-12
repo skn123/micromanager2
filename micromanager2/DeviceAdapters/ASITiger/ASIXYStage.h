@@ -54,6 +54,8 @@ public:
    int SetRelativePositionSteps(long x, long y);
    int GetStepLimits(long& xMin, long& xMax, long& yMin, long& yMax);
    int SetOrigin();
+   int SetXOrigin();
+   int SetYOrigin();
    int Home();
    int SetHome();
 
@@ -130,7 +132,7 @@ public:
    int OnScanSlowStartPosition(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnScanSlowStopPosition (MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnScanNumLines         (MM::PropertyBase* pProp, MM::ActionType eAct);
-   int OnScanOvershootFactor  (MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnScanSettlingTime     (MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
    double unitMultX_;

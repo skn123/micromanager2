@@ -51,8 +51,10 @@ CScanner::CScanner(const char* name) :
    axisLetterY_(g_EmptyAxisLetterStr),    // value determined by extended name
    unitMultX_(g_ScannerDefaultUnitMult),  // later will try to read actual setting
    unitMultY_(g_ScannerDefaultUnitMult),  // later will try to read actual setting
-   limitX_(0),   // later will try to read actual setting
-   limitY_(0),   // later will try to read actual setting
+   upperLimitX_(0),   // later will try to read actual setting
+   upperLimitY_(0),   // later will try to read actual setting
+   lowerLimitX_(0),   // later will try to read actual setting
+   lowerLimitY_(0),   // later will try to read actual setting
    shutterX_(0), // home position, used to turn beam off
    shutterY_(0), // home position, used to turn beam off
    lastX_(0),    // cached position before blanking, used for SetIlluminationState
@@ -64,7 +66,12 @@ CScanner::CScanner(const char* name) :
    ring_buffer_supported_(false),
    laser_side_(0),   // will be set to 1 or 2 if used
    laserTTLenabled_(false),
-   refreshOverride_(false)
+   refreshOverride_(false),
+   mmTarget_(false),
+   targetExposure_(0),
+   targetSettling_(5),
+   axisIndexX_(0),
+   axisIndexY_(1)
 {
 
    // initialize these structs
@@ -103,11 +110,12 @@ int CScanner::Initialize()
    command.str("");
    command << "HM " << axisLetterX_ << "? ";
    RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":") );
-   RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(shutterX_) );
+   RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(shutterX_) );  // already in units of degrees
+
    command.str("");
    command << "HM " << axisLetterY_ << "? ";
    RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":") );
-   RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(shutterY_) );
+   RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(shutterY_) ); // already in units of degrees
 
    // set controller card to return positions with 1 decimal places (3 is max allowed currently, units are millidegrees)
    command.str("");
@@ -163,6 +171,16 @@ int CScanner::Initialize()
    pAct = new CPropertyAction (this, &CScanner::OnUpperLimY);
    CreateProperty(g_ScannerUpperLimYPropertyName, "0", MM::Float, false, pAct);
    UpdateProperty(g_ScannerUpperLimYPropertyName);
+
+   // for older firmware fix the blanking position of 1000 degrees which is far beyond the limits
+   // assume that the blanking position is the maximum limit
+   // firmware 3.10+ this is fixed, but this code can still execute without problem
+   if (shutterX_ > 100) {
+      GetProperty(g_ScannerUpperLimXPropertyName, shutterX_);
+   }
+   if (shutterY_ > 100) {
+      GetProperty(g_ScannerUpperLimYPropertyName, shutterY_);
+   }
 
    // mode, currently just changes between internal and external input
    pAct = new CPropertyAction (this, &CScanner::OnMode);
@@ -229,7 +247,7 @@ int CScanner::Initialize()
    AddAllowedValue(g_JoystickSelectYPropertyName, g_JSCode_23, 23);
    UpdateProperty(g_JoystickSelectYPropertyName);
 
-   if (firmwareVersion_ > 2.865)  // changed behavior of JS F and T as of v2.87
+   if (FirmwareVersionAtLeast(2.87))  // changed behavior of JS F and T as of v2.87
    {
       // fast wheel speed (JS F) (per-card, not per-axis)
       pAct = new CPropertyAction (this, &CScanner::OnWheelFastSpeed);
@@ -251,7 +269,7 @@ int CScanner::Initialize()
       UpdateProperty(g_WheelMirrorPropertyName);
    }
 
-   if (firmwareVersion_ > 2.825)  // added in v2.83
+   if (FirmwareVersionAtLeast(2.83))  // added in v2.83
    {
       // scanner range
       command.str("");
@@ -271,14 +289,6 @@ int CScanner::Initialize()
       CreateProperty(g_ScannerTravelRangePropertyName, command.str().c_str(), MM::Integer, true);
       UpdateProperty(g_ScannerTravelRangePropertyName);
    }
-
-   // turn the beam on and off
-   pAct = new CPropertyAction (this, &CScanner::OnBeamEnabled);
-   CreateProperty(g_ScannerBeamEnabledPropertyName, g_YesState, MM::String, false, pAct);
-   AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_NoState);
-   AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_YesState);
-   UpdateIlluminationState();
-   UpdateProperty(g_ScannerBeamEnabledPropertyName);
 
    // single-axis mode settings
    // todo fix firmware TTL initialization problem where SAM p=2 triggers by itself 1st time
@@ -349,18 +359,36 @@ int CScanner::Initialize()
    AddAllowedValue(g_AxisPolarityY, g_AxisPolarityReversed);
    AddAllowedValue(g_AxisPolarityY, g_AxisPolarityNormal);
 
-   // end now if we are pre-2.8 firmware
-   if (firmwareVersion_ < 2.795)
-   {
-      initialized_ = true;
-      return DEVICE_OK;
-   }
-
-   // everything below only supported in firmware 2.8 and newer
-
    // get build info so we can add optional properties
    build_info_type build;
    RETURN_ON_MM_ERROR( hub_->GetBuildInfo(addressChar_, build) );
+
+   // add phototargeting (MM_TARGET) properties if supported
+   if (build.vAxesProps[0] & BIT3)
+   {
+      mmTarget_ = true;
+
+      pAct = new CPropertyAction (this, &CScanner::OnTargetExposureTime);
+      CreateProperty(g_TargetExposureTimePropertyName, "0", MM::Integer, false, pAct);
+      UpdateProperty(g_TargetExposureTimePropertyName);
+
+      pAct = new CPropertyAction (this, &CScanner::OnTargetSettlingTime);
+      CreateProperty(g_TargetSettlingTimePropertyName, "0", MM::Integer, false, pAct);
+      UpdateProperty(g_TargetSettlingTimePropertyName);
+   }
+
+   // turn the beam on and off
+   // need to do this after finding the correct value for mmTarget_
+   pAct = new CPropertyAction (this, &CScanner::OnBeamEnabled);
+   CreateProperty(g_ScannerBeamEnabledPropertyName, g_NoState, MM::String, false, pAct);
+   AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_NoState);
+   AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_YesState);
+   UpdateIlluminationState();
+   UpdateProperty(g_ScannerBeamEnabledPropertyName);
+   // always start with the beam off for safety
+   SetProperty(g_ScannerBeamEnabledPropertyName, g_NoState);
+
+   // everything below only supported in firmware 2.8 and newer
 
    // add SPIM properties if SPIM is supported
    if (build.vAxesProps[0] & BIT4)
@@ -408,7 +436,7 @@ int CScanner::Initialize()
       AddAllowedValue(g_SPIMStatePropertyName, g_SPIMStateRunning);
       UpdateProperty(g_SPIMStatePropertyName);
 
-      if (firmwareVersion_ > 2.84)
+      if (FirmwareVersionAtLeast(2.84))
       {
          pAct = new CPropertyAction (this, &CScanner::OnSPIMDelayBeforeRepeat);
          CreateProperty(g_SPIMDelayBeforeRepeatPropertyName, "0", MM::Float, false, pAct);
@@ -430,7 +458,7 @@ int CScanner::Initialize()
          CreateProperty(g_SPIMLaserDurationPropertyName, "0", MM::Float, false, pAct);
          UpdateProperty(g_SPIMLaserDurationPropertyName);
 
-         if (firmwareVersion_ < 2.879)  // as of v2.88 this changed; property will be added later if define present
+         if (!FirmwareVersionAtLeast(2.88))  // as of v2.88 this changed; property will be added later if define present
          {
             pAct = new CPropertyAction (this, &CScanner::OnLaserOutputMode);
             CreateProperty(g_LaserOutputModePropertyName, "0", MM::String, false, pAct);
@@ -441,7 +469,7 @@ int CScanner::Initialize()
          }
       }
 
-      if (firmwareVersion_ > 2.885)  // get 2.89 features
+      if (FirmwareVersionAtLeast(2.89))  // get 2.89 features
       {
          pAct = new CPropertyAction (this, &CScanner::OnSPIMScannerHomeEnable);
          CreateProperty(g_SPIMScannerHomeEnable, "0", MM::String, false, pAct);
@@ -456,7 +484,7 @@ int CScanner::Initialize()
          UpdateProperty(g_SPIMPiezoHomeEnable);
       }
 
-      if (firmwareVersion_ > 3.005)  // in 3.01 added setting to allow multiple slices per piezo movement
+      if (FirmwareVersionAtLeast(3.01))  // in 3.01 added setting to allow multiple slices per piezo movement
       {
          pAct = new CPropertyAction (this, &CScanner::OnSPIMNumSlicesPerPiezo);
          CreateProperty(g_SPIMNumSlicesPerPiezoPropertyName, "1", MM::Integer, false, pAct);
@@ -466,10 +494,18 @@ int CScanner::Initialize()
          CreateProperty(g_SPIMNumSlicesPerPiezoPropertyName, "1", MM::Integer, true);
       }
 
+      if (FirmwareVersionAtLeast(3.09)) {  // in 3.09 added bit 4 of SPIM mode for interleaved slices
+         pAct = new CPropertyAction (this, &CScanner::OnSPIMInterleaveSidesEnable);
+         CreateProperty(g_SPIMInterleaveSidesEnable, "0", MM::String, false, pAct);
+         AddAllowedValue(g_SPIMInterleaveSidesEnable, g_YesState);
+         AddAllowedValue(g_SPIMInterleaveSidesEnable, g_NoState);
+         UpdateProperty(g_SPIMInterleaveSidesEnable);
+      }
+
    }
 
    // add ring buffer properties if supported (starting 2.81)
-   if ((firmwareVersion_ > 2.8) && (build.vAxesProps[0] & BIT1))
+   if ((FirmwareVersionAtLeast(2.81)) && (build.vAxesProps[0] & BIT1))
    {
       ring_buffer_supported_ = true;
 
@@ -499,24 +535,24 @@ int CScanner::Initialize()
       UpdateProperty(g_RB_AutoplayRunningPropertyName);
    }
 
-   if (firmwareVersion_ > 2.875)  // 2.88+
+   if (FirmwareVersionAtLeast(2.88))  // 2.88+
    {
       // populate laser_side_ appropriately
       command.str("");
       command << "Z2B " << axisLetterX_ << "?";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A"));
-      long axis_index;
-      RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(axis_index) );
+      RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(axisIndexX_) );
       // pre-1.94 comm firmware with 2.88+ micro-mirror firmware doesn't give back equals
       //  => we assume comm/stage firmwares are updated together
       // 1.94+ comm firmware with pre-2.88 stage firmware reports back 0 for all axis indexes
-      switch (axis_index)
+      switch (axisIndexX_)
       {
          case 1:
          case 0: laser_side_ = 1; break;
          case 3:
          case 2: laser_side_ = 2; break;
       }
+      axisIndexY_ = axisIndexX_ + 1;
 
       laserTTLenabled_ = hub_->IsDefinePresent(build, "MM_LASER_TTL");
       if (laserTTLenabled_)
@@ -578,23 +614,42 @@ bool CScanner::Busy()
 
 int CScanner::SetPosition(double x, double y)
 // will not change the position of an axis unless single-axis functions are inactive
+// also will not change the position if the beam is turned off, but it will change the
+// cached positions that are used when the beam is turned back on
 {
-   if (!illuminationState_) return DEVICE_OK;  // don't do anything if beam is turned off
    ostringstream command; command.str("");
-   char SAMode[MM::MaxStrLength];
-   RETURN_ON_MM_ERROR ( GetProperty(g_SAModeXPropertyName, SAMode) );
-   bool xMovable = strcmp(SAMode, g_SAMode_0) == 0;
-   RETURN_ON_MM_ERROR ( GetProperty(g_SAModeYPropertyName, SAMode) );
-   bool yMovable = strcmp(SAMode, g_SAMode_0) == 0;
-   if (xMovable && yMovable) {
-      command << "M " << axisLetterX_ << "=" << x*unitMultX_ << " " << axisLetterY_ << "=" << y*unitMultY_;
-      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
-   } else if (xMovable && !yMovable) {
-      command << "M " << axisLetterX_ << "=" << x*unitMultX_;
-      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
-   } else if (!xMovable && yMovable) {
-      command << "M " << axisLetterY_ << "=" << y*unitMultY_;
-      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+   if (illuminationState_) {  // beam is turned on
+      char SAMode[MM::MaxStrLength];
+      RETURN_ON_MM_ERROR ( GetProperty(g_SAModeXPropertyName, SAMode) );
+      bool xMovable = strcmp(SAMode, g_SAMode_0) == 0;
+      RETURN_ON_MM_ERROR ( GetProperty(g_SAModeYPropertyName, SAMode) );
+      bool yMovable = strcmp(SAMode, g_SAMode_0) == 0;
+      if (xMovable && yMovable) {
+         command << "M " << axisLetterX_ << "=" << x*unitMultX_ << " " << axisLetterY_ << "=" << y*unitMultY_;
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+      } else if (xMovable && !yMovable) {
+         command << "M " << axisLetterX_ << "=" << x*unitMultX_;
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+      } else if (!xMovable && yMovable) {
+         command << "M " << axisLetterY_ << "=" << y*unitMultY_;
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+      }
+   } else {  // beam is turned off
+      // update the cached position to be the current commanded position
+      // so that beam will go there when turned back on
+      // except don't do anything if we are setting position to blanking position
+      // this way we can update just one of the two cached positions by passing
+      // the other axis as the corresponding blanking position
+      if (double_cmp(x, shutterX_) != 0
+            && double_cmp(x, upperLimitX_) < 0
+            && double_cmp(x, lowerLimitX_) > 0) {
+         lastX_ = x;
+      }
+      if (double_cmp(y, shutterY_) != 0
+            && double_cmp(y, upperLimitY_) < 0
+            && double_cmp(y, lowerLimitY_) > 0) {
+         lastY_ = y;
+      }
    }
    return DEVICE_OK;
 }
@@ -602,6 +657,7 @@ int CScanner::SetPosition(double x, double y)
 int CScanner::GetPosition(double& x, double& y)
 {
 //   // read from card instead of using cached values directly, could be slight mismatch
+   // TODO implement as single serial command for speed (know that X axis always before Y on card)
    ostringstream command; command.str("");
    command << "W " << axisLetterX_;
    RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
@@ -617,44 +673,63 @@ int CScanner::GetPosition(double& x, double& y)
 
 void CScanner::UpdateIlluminationState()
 {
-   // no direct way to query the controller if we are in "home" position or not
-   // here we make the assumption that if both axes are at upper limits we are at home
-   if (firmwareVersion_ > 2.7)  // require version 2.8 to do this
-   {
-      ostringstream command; command.str("");
-      command << "RS " << axisLetterX_ << "-";
-      if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // don't choke on comm error
-         return;
-      if (hub_->LastSerialAnswer().at(3) != 'U')
-      {
-         illuminationState_ = true;
-         return;
-      }
-      command.str("");
-      command << "RS " << axisLetterY_ << "-";
-      if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // don't choke on comm error
-         return;
-      if (hub_->LastSerialAnswer().at(3) != 'U')
-      {
-         illuminationState_ = true;
-         return;
-      }
-      // if we made it this far then both axes are at upper limits
-      illuminationState_ = false;
+   ostringstream command; command.str("");
+   long tmp;
+   if (mmTarget_) {
+      // should consider having a dedicated property for TTL output state; for now just do this
+      command << addressChar_ << "TTL Y?";
+      hub_->QueryCommandVerify(command.str(), ":A Y=");
+      hub_->ParseAnswerAfterEquals(tmp);
+      illuminationState_ = (tmp == 1);
       return;
+   }
+   else
+   {
+      // no direct way to query the controller if we are in "home" position or not
+      // here we make the assumption that if both axes are at upper limits we are at home
+      if (FirmwareVersionAtLeast(2.8))  // require version 2.8 to do this
+      {
+         command << "RS " << axisLetterX_ << "-";
+         if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // don't choke on comm error
+            return;
+         if (hub_->LastSerialAnswer().at(3) != 'U')
+         {
+            illuminationState_ = true;
+            return;
+         }
+         command.str("");
+         command << "RS " << axisLetterY_ << "-";
+         if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // don't choke on comm error
+            return;
+         if (hub_->LastSerialAnswer().at(3) != 'U')
+         {
+            illuminationState_ = true;
+            return;
+         }
+         // if we made it this far then both axes are at upper limits
+         illuminationState_ = false;
+         return;
+      }
    }
 }
 
 int CScanner::SetIlluminationStateHelper(bool on)
 // takes care of setting LED X appropriately, preserving existing setting for other scanner
 {
+   // don't do this if we have phototargeting firmware
+   if (mmTarget_)
+   {
+      return DEVICE_OK;
+   }
    ostringstream command; command.str("");
    long tmp;
-   if (firmwareVersion_ < 2.879) // only applies 2.88+
+   if (!FirmwareVersionAtLeast(2.88)) // doesn't work before 2.88
       return DEVICE_OK;
    if(!laserTTLenabled_)
       return DEVICE_OK;
    // need to know whether other scanner device is turned on => must query it anyway
+   // would be nice if there was some way this information could be stored in hub object
+   // and cut down on serial communication
    command << addressChar_ << "LED X?";
    RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),"X=") );
    RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
@@ -685,33 +760,55 @@ int CScanner::SetIlluminationStateHelper(bool on)
 }
 
 int CScanner::SetIlluminationState(bool on)
-// we can't turn off beam but we can steer beam to corner where hopefully it is blocked internally
 {
-   // to reduce serial traffic we count on illuminationState_ being up to date
-   // if user manually moves to home position then we won't know it
-   // UpdateIlluminationState();  // don't do to reduce traffic
-   if (on && !illuminationState_)  // was off, turning on
-   {
-      illuminationState_ = true;
-      RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(true) );
-      return SetPosition(lastX_, lastY_);  // move to where it was when last turned off
-   }
-   else if (!on && illuminationState_) // was on, turning off
-   {
-      // stop any single-axis action happening first; should go to position before single-axis was started
-      // firmware will stop single-axis actions anyway but this gives us the right position
-      SetProperty(g_SAModeXPropertyName, g_SAMode_0);
-      SetProperty(g_SAModeYPropertyName, g_SAMode_0);
-      GetPosition(lastX_, lastY_);  // read and store pre-off position so we can undo
-      illuminationState_ = false;
+   if (mmTarget_)
+   {  // for phototargeting firmware
+      // should consider having a dedicated property for TTL output state; for now just do this
       ostringstream command; command.str("");
-      command << "! " << axisLetterX_ << " " << axisLetterY_;
-      RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(false) );
-      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
-      return DEVICE_OK;
+      if (on && !illuminationState_)  // was off, turning on
+      {
+         illuminationState_ = true;
+         command << addressChar_ << "TTL Y=1";
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+      }
+      else if (!on && illuminationState_) // was on, turning off
+      {
+         illuminationState_ = false;
+         command << addressChar_ << "TTL Y=11";
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+      }
+      // if was off, turning off do nothing
+      // if was on, turning on do nothing
    }
-   // if was off, turning off do nothing
-   // if was on, turning on do nothing
+   else
+   { // for standard micro-mirror firmware
+      // we can't turn off beam but we can steer beam to corner where hopefully it is blocked internally
+      // to reduce serial traffic we count on illuminationState_ being up to date
+      // if user manually moves to home position then we won't know it
+      // UpdateIlluminationState();  // don't do to reduce traffic
+      if (on && !illuminationState_)  // was off, turning on
+      {
+         illuminationState_ = true;
+         RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(true) );
+         return SetPosition(lastX_, lastY_);  // move to where it was when last turned off
+      }
+      else if (!on && illuminationState_) // was on, turning off
+      {
+         // stop any single-axis action happening first; should go to position before single-axis was started
+         // firmware will stop single-axis actions anyway but this gives us the right position
+         SetProperty(g_SAModeXPropertyName, g_SAMode_0);
+         SetProperty(g_SAModeYPropertyName, g_SAMode_0);
+         GetPosition(lastX_, lastY_);  // read and store pre-off position so we can undo
+         illuminationState_ = false;
+         ostringstream command; command.str("");
+         command << "! " << axisLetterX_ << " " << axisLetterY_;
+         RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(false) );
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+         return DEVICE_OK;
+      }
+      // if was off, turning off do nothing
+      // if was on, turning on do nothing
+   }
    return DEVICE_OK;
 }
 
@@ -744,6 +841,14 @@ int CScanner::LoadPolygons()
                << " " << axisLetterY_ << "=" << polygons_[i].second*unitMultY_;
          RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
       }
+      if (!mmTarget_)
+      {
+         // make the last point the home/shutter position for non-target firmware
+         command.str("");
+         command << "LD " << axisLetterX_ << "=" << shutterX_*unitMultX_
+               << " " << axisLetterY_ << "=" << shutterY_*unitMultY_;
+         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      }
    }
    else
    {
@@ -762,18 +867,50 @@ int CScanner::RunPolygons()
 {
    if (ring_buffer_supported_)
    {
+      RETURN_ON_MM_ERROR ( SetProperty(g_RB_ModePropertyName, g_RB_PlayOnce_2) );
+
+      // essentially like SetIlluminationState(true) but no caching
+      illuminationState_ = true;
+      RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(true) );
+
       ostringstream command; command.str("");
       command << addressChar_ << "RM";
-      return hub_->QueryCommandVerify(command.str(), ":A");
+
+      // trigger ring buffer requested number of times, sleeping until done
+      // TODO support specified # of repeats in firmware directly
+      for (int j=0; j<polygonRepetitions_; ++j) {
+         hub_->QueryCommandVerify(command.str(), ":A");
+         bool done = false;
+         do {
+            char propValue[MM::MaxStrLength];
+            refreshOverride_ = true;
+            // check flag to see if we are still playing
+            // flag goes low as soon as last point is moved to, which we have as home/shutter
+            // so will be briefly shuttered and then start up again
+            RETURN_ON_MM_ERROR ( GetProperty(g_RB_AutoplayRunningPropertyName, propValue) );
+            if (strcmp(propValue, g_YesState) == 0) {
+               CDeviceUtils::SleepMs(100);
+            } else {
+               done = true;
+            }
+         } while (!done);
+      }
+
+      // essentially like SetIlluminationState(false) but no caching
+      // we have already turned the beam off by setting last ring buffer location to home
+      illuminationState_ = false;
+      RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(false) );
    }
    else
    {
-      // no HW support => have to repeatedly call SetPosition
+      // no HW support via ring buffer => have to repeatedly call PointAndFire
+      // ideally targetExposure_ will have been set by a call to SetSpotInterval before this
+      // so that PointAndFire doesn't have to change/restore the exposure or "on" time
       for (int j=0; j<polygonRepetitions_; ++j)
          for (int i=0; i< (int) polygons_.size(); ++i)
-            SetPosition(polygons_[i].first,polygons_[i].second);
-      return DEVICE_OK;
+            PointAndFire(polygons_[i].first,polygons_[i].second, targetExposure_*1000);
    }
+   return DEVICE_OK;
 }
 
 int CScanner::GetChannel(char* channelName)
@@ -788,6 +925,8 @@ int CScanner::RunSequence()
 {
    if (ring_buffer_supported_)
    {
+      // should consider ensuring that RM Y is set appropriately with axisIndexX_ and axisIndexY_
+
       // note that this simply sends a trigger, which will also turn it off if it's currently running
       SetProperty(g_RB_TriggerPropertyName, g_DoItState);
       return DEVICE_OK;
@@ -798,12 +937,79 @@ int CScanner::RunSequence()
    }
 }
 
+int CScanner::SetSpotInterval(double pulseInterval_us)
+{
+   // sets time between points in sequence (and also "on" time for PointAndFire)
+   // it appears from SLM code in Projector plugin that this is used to set the actual "on" time
+   // and that the interval will depend on hardware overhead time to switch positions
+   // so we take the same general approach here: use the requested pulseInterval_us NOT
+   // as an actual interval but as the on-time and set the hardware interval to include the on time
+   // plus the time required to move to a new position (wait time plus a bit of overhead)
+   long targetExposure = long (pulseInterval_us/1000 + 0.5);  // our instance variable gets updated in the property handler
+   ostringstream command; command.str("");
+   char propValue1[MM::MaxStrLength];
+   command << targetExposure;
+   CDeviceUtils::CopyLimitedString(propValue1, command.str().c_str());
+   RETURN_ON_MM_ERROR ( SetProperty(g_TargetExposureTimePropertyName, propValue1) );
+   long intervalMs = targetExposure_ + targetSettling_ + 3;  // 3 ms extra cushion, need 1-2 ms for busy signal to go low beyond wait time
+   command.str("");
+   char propValue2[MM::MaxStrLength];
+   command << intervalMs;
+   CDeviceUtils::CopyLimitedString(propValue2, command.str().c_str());
+   RETURN_ON_MM_ERROR ( SetProperty(g_RB_DelayPropertyName, propValue2) );
+   return DEVICE_OK;
+}
+
+int CScanner::PointAndFire(double x, double y, double time_us)
+{
+   long exposure_ms = (long)(time_us/1000 + 0.5);
+   long orig_exposure = 0;
+   bool changeExposure = false;
+   ostringstream command; command.str("");
+   if (mmTarget_)
+   {  // we have phototargeting-specific firmware
+      // change exposure if needed; will restore afterwards
+      // decided to do this rather than change the exposure time as side effect
+      // if decide to set exposure time every time could use Z parameter of AIJ
+      // which would reduce serial communication time
+      // but ProjectorPlugin uses same "Exposure Time" over and over it will only send AIJ
+      if (exposure_ms != targetExposure_)
+      {
+         changeExposure = true;
+         orig_exposure = targetExposure_;
+         command << exposure_ms;
+         SetProperty(g_TargetExposureTimePropertyName, command.str().c_str());
+         command.str("");
+      }
+      // send the AIJ command to do the move and fire
+      command << addressChar_ << "AIJ X=" << x*unitMultX_ << " Y=" << y*unitMultY_;
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A"));
+      // restore prior exposure time
+      if (changeExposure)
+      {
+         command.str("");
+         command << orig_exposure;
+         SetProperty(g_TargetExposureTimePropertyName, command.str().c_str());
+      }
+
+   }
+   else
+   {
+      // no hardware timing => have to do timing in software and use SetPosition() instead of AIJ command
+      SetIlluminationState(false);
+      SetPosition(x, y);
+      SetIlluminationState(true);
+      CDeviceUtils::SleepMs(exposure_ms);
+      SetIlluminationState(false);
+   }
+   return DEVICE_OK;
+}
 
 ////////////////
 // action handlers
 
 int CScanner::OnSaveJoystickSettings()
-// redoes the joystick settings so they can be saved using SS Z
+// redo the joystick settings so they can be saved using SS Z
 {
    long tmp;
    string tmpstr;
@@ -879,19 +1085,23 @@ int CScanner::OnLowerLimX(MM::PropertyBase* pProp, MM::ActionType eAct)
    double tmp = 0;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << "SL " << axisLetterX_ << "?";
       response << ":A " << axisLetterX_ << "=";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
       RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
       if (!pProp->Set(tmp))
          return DEVICE_INVALID_PROPERTY_VALUE;
+      lowerLimitX_ = tmp;  // already in units of degrees
    }
    else if (eAct == MM::AfterSet) {
       pProp->Get(tmp);
       command << "SL " << axisLetterX_ << "=" << tmp;
       RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      refreshOverride_ = true;
+      return OnLowerLimX(pProp, MM::BeforeGet);
    }
    return DEVICE_OK;
 }
@@ -903,19 +1113,23 @@ int CScanner::OnLowerLimY(MM::PropertyBase* pProp, MM::ActionType eAct)
    double tmp = 0;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << "SL " << axisLetterY_ << "?";
       response << ":A " << axisLetterY_ << "=";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
       RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
       if (!pProp->Set(tmp))
          return DEVICE_INVALID_PROPERTY_VALUE;
+      lowerLimitY_ = tmp;  // already in units of degrees
    }
    else if (eAct == MM::AfterSet) {
       pProp->Get(tmp);
       command << "SL " << axisLetterY_ << "=" << tmp;
       RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      refreshOverride_ = true;
+      return OnLowerLimY(pProp, MM::BeforeGet);
    }
    return DEVICE_OK;
 }
@@ -927,20 +1141,23 @@ int CScanner::OnUpperLimX(MM::PropertyBase* pProp, MM::ActionType eAct)
    double tmp = 0;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << "SU " << axisLetterX_ << "?";
       response << ":A " << axisLetterX_ << "=";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
       RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
       if (!pProp->Set(tmp))
          return DEVICE_INVALID_PROPERTY_VALUE;
-      limitX_ = tmp;
+      upperLimitX_ = tmp;  // already in units of degrees
    }
    else if (eAct == MM::AfterSet) {
       pProp->Get(tmp);
       command << "SU " << axisLetterX_ << "=" << tmp;
       RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      refreshOverride_ = true;
+      return OnUpperLimX(pProp, MM::BeforeGet);
    }
    return DEVICE_OK;
 }
@@ -952,20 +1169,23 @@ int CScanner::OnUpperLimY(MM::PropertyBase* pProp, MM::ActionType eAct)
    double tmp = 0;
    if (eAct == MM::BeforeGet)
    {
-      if (!refreshProps_ && initialized_)
+      if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
+      refreshOverride_ = false;
       command << "SU " << axisLetterY_ << "?";
       response << ":A " << axisLetterY_ << "=";
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
       RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
       if (!pProp->Set(tmp))
          return DEVICE_INVALID_PROPERTY_VALUE;
-      limitY_ = tmp;
+      upperLimitY_ = tmp;  // already in units of degrees
    }
    else if (eAct == MM::AfterSet) {
       pProp->Get(tmp);
       command << "SU " << axisLetterY_ << "=" << tmp;
       RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      refreshOverride_ = true;
+      return OnUpperLimY(pProp, MM::BeforeGet);
    }
    return DEVICE_OK;
 }
@@ -980,7 +1200,7 @@ int CScanner::OnMode(MM::PropertyBase* pProp, MM::ActionType eAct)
       if (!refreshProps_ && initialized_)
          return DEVICE_OK;
       ostringstream response; response.str("");
-      if (firmwareVersion_ > 2.7)
+      if (FirmwareVersionAtLeast(2.7))
       {
          command << "PM " << axisLetterX_ << "?";
          response << axisLetterX_ << "=";
@@ -990,10 +1210,10 @@ int CScanner::OnMode(MM::PropertyBase* pProp, MM::ActionType eAct)
          command << "MA " << axisLetterX_ << "?";
          response << ":A " << axisLetterX_ << "=";
       }
-      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), response.str()));
       RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
       bool success = 0;
-      if (firmwareVersion_ > 2.7)  // using PM command
+      if (FirmwareVersionAtLeast(2.7))  // using PM command
       {
          switch (tmp)
          {
@@ -1017,7 +1237,7 @@ int CScanner::OnMode(MM::PropertyBase* pProp, MM::ActionType eAct)
    else if (eAct == MM::AfterSet) {
       string tmpstr;
       pProp->Get(tmpstr);
-      if (firmwareVersion_ > 2.7)  // using PM command
+      if (FirmwareVersionAtLeast(2.7))  // using PM command
       {
          if (tmpstr.compare(g_ScannerMode_internal) == 0)
             tmp = 0;
@@ -2563,50 +2783,7 @@ int CScanner::OnLaserOutputMode(MM::PropertyBase* pProp, MM::ActionType eAct)
    ostringstream command; command.str("");
    long tmp = 0;
    bool success;
-   if (firmwareVersion_ < 2.879)  // corresponding serial command changed to LED Z in v2.88
-   {
-      if (eAct == MM::BeforeGet)
-      {
-         if (!refreshProps_ && initialized_)
-            return DEVICE_OK;
-         command << addressChar_ << "NR Z?";
-         RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
-         RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
-         tmp = tmp >> 2;   // shift left to get bits 2 and 3 in position of two LSBs
-         tmp &= (0x03);    // mask off all but what used to be bits 2 and 3; this mitigates uncertainty of whether 1 or 0 was shifted in
-         switch (tmp)
-         {
-            case 0: success = pProp->Set(g_SPIMLaserOutputMode_0); break;
-            case 1: success = pProp->Set(g_SPIMLaserOutputMode_1); break;
-            case 2: success = pProp->Set(g_SPIMLaserOutputMode_2); break;
-            default: success = 0;
-         }
-         if (!success)
-            return DEVICE_INVALID_PROPERTY_VALUE;
-      }
-      else if (eAct == MM::AfterSet) {
-         string tmpstr;
-         pProp->Get(tmpstr);
-         if (tmpstr.compare(g_SPIMLaserOutputMode_0) == 0)
-            tmp = 0;
-         else if (tmpstr.compare(g_SPIMLaserOutputMode_1) == 0)
-            tmp = 1;
-         else if (tmpstr.compare(g_SPIMLaserOutputMode_2) == 0)
-            tmp = 2;
-         else
-            return DEVICE_INVALID_PROPERTY_VALUE;
-         tmp = tmp << 2;  // right shift to get the value to bits 2 and 3
-         command << addressChar_ << "NR Z?";
-         long tmp2;
-         RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
-         RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp2) );
-         tmp += (tmp2 & (0xF3));  // preserve the upper 4 bits and the two LSBs from prior setting, add bits 2 and 3 in manually
-         command.str("");
-         command << addressChar_ << "NR Z=" << tmp;
-         RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
-      }
-   }
-   else  // v2.88+
+   if (FirmwareVersionAtLeast(2.88))  // corresponding serial command changed to LED Z in v2.88
    {
       if (eAct == MM::BeforeGet)
       {
@@ -2649,6 +2826,49 @@ int CScanner::OnLaserOutputMode(MM::PropertyBase* pProp, MM::ActionType eAct)
          RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
       }
    }
+   else  // before v2.88
+   {
+      if (eAct == MM::BeforeGet)
+            {
+               if (!refreshProps_ && initialized_)
+                  return DEVICE_OK;
+               command << addressChar_ << "NR Z?";
+               RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
+               RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
+               tmp = tmp >> 2;   // shift left to get bits 2 and 3 in position of two LSBs
+               tmp &= (0x03);    // mask off all but what used to be bits 2 and 3; this mitigates uncertainty of whether 1 or 0 was shifted in
+               switch (tmp)
+               {
+                  case 0: success = pProp->Set(g_SPIMLaserOutputMode_0); break;
+                  case 1: success = pProp->Set(g_SPIMLaserOutputMode_1); break;
+                  case 2: success = pProp->Set(g_SPIMLaserOutputMode_2); break;
+                  default: success = 0;
+               }
+               if (!success)
+                  return DEVICE_INVALID_PROPERTY_VALUE;
+            }
+            else if (eAct == MM::AfterSet) {
+               string tmpstr;
+               pProp->Get(tmpstr);
+               if (tmpstr.compare(g_SPIMLaserOutputMode_0) == 0)
+                  tmp = 0;
+               else if (tmpstr.compare(g_SPIMLaserOutputMode_1) == 0)
+                  tmp = 1;
+               else if (tmpstr.compare(g_SPIMLaserOutputMode_2) == 0)
+                  tmp = 2;
+               else
+                  return DEVICE_INVALID_PROPERTY_VALUE;
+               tmp = tmp << 2;  // right shift to get the value to bits 2 and 3
+               command << addressChar_ << "NR Z?";
+               long tmp2;
+               RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
+               RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp2) );
+               tmp += (tmp2 & (0xF3));  // preserve the upper 4 bits and the two LSBs from prior setting, add bits 2 and 3 in manually
+               command.str("");
+               command << addressChar_ << "NR Z=" << tmp;
+               RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+            }
+   }
    return DEVICE_OK;
 }
 
@@ -2686,7 +2906,7 @@ int CScanner::OnSPIMScannerHomeEnable(MM::PropertyBase* pProp, MM::ActionType eA
          tmp = 1;
       else
          return DEVICE_INVALID_PROPERTY_VALUE;
-      tmp = tmp << 2;  // right shift to get the value to bits 2
+      tmp = tmp << 2;  // right shift to get the value to bit 2
       command << addressChar_ << "NR Z?";
       long tmp2;
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
@@ -2733,12 +2953,58 @@ int CScanner::OnSPIMPiezoHomeEnable(MM::PropertyBase* pProp, MM::ActionType eAct
          tmp = 1;
       else
          return DEVICE_INVALID_PROPERTY_VALUE;
-      tmp = tmp << 3;  // right shift to get the value to bits 3
+      tmp = tmp << 3;  // right shift to get the value to bit 3
       command << addressChar_ << "NR Z?";
       long tmp2;
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
       RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp2) );
       tmp += (tmp2 & (0xF7));  // keep bit 3 from tmp, all others use current setting
+      command.str("");
+      command << addressChar_ << "NR Z=" << tmp;
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+   }
+   return DEVICE_OK;
+}
+
+int CScanner::OnSPIMInterleaveSidesEnable(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   ostringstream command; command.str("");
+   long tmp = 0;
+   bool success;
+
+   if (eAct == MM::BeforeGet)
+   {
+      if (!refreshProps_ && initialized_)
+         return DEVICE_OK;
+      command << addressChar_ << "NR Z?";
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
+      RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
+      tmp = tmp >> 4;   // shift left to get bits 4 in position of LSB
+      tmp &= (0x01);    // mask off all but what used to be bit 4
+      switch (tmp)
+      {
+         case 0: success = pProp->Set(g_NoState); break;
+         case 1: success = pProp->Set(g_YesState); break;
+         default: success = 0;
+      }
+      if (!success)
+         return DEVICE_INVALID_PROPERTY_VALUE;
+   }
+   else if (eAct == MM::AfterSet) {
+      string tmpstr;
+      pProp->Get(tmpstr);
+      if (tmpstr.compare(g_NoState) == 0)
+         tmp = 0;
+      else if (tmpstr.compare(g_YesState) == 0)
+         tmp = 1;
+      else
+         return DEVICE_INVALID_PROPERTY_VALUE;
+      tmp = tmp << 4;  // right shift to get the value to bit 4
+      command << addressChar_ << "NR Z?";
+      long tmp2;
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Z="));
+      RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp2) );
+      tmp += (tmp2 & (0xEF));  // keep bit 4 from tmp, all others use current setting
       command.str("");
       command << addressChar_ << "NR Z=" << tmp;
       RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
@@ -3028,14 +3294,17 @@ int CScanner::OnSPIMState(MM::PropertyBase* pProp, MM::ActionType eAct)
 int CScanner::OnRBMode(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    ostringstream command; command.str("");
+   ostringstream response; response.str("");
+   string pseudoAxisChar = FirmwareVersionAtLeast(2.89) ? "F" : "X";
    long tmp;
+
    if (eAct == MM::BeforeGet)
    {
       if (!refreshProps_ && initialized_)
          return DEVICE_OK;
-      command << addressChar_ << ((firmwareVersion_ < 2.885) ? "RM X?" : "RM F?");
-      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(),
-            (firmwareVersion_ < 2.885) ? ":A X=" : ":A F="));
+      command << addressChar_ << "RM " << pseudoAxisChar << "?";
+      response << ":A " << pseudoAxisChar << "=";
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()) );
       RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
       if (tmp >= 128)
       {
@@ -3064,7 +3333,7 @@ int CScanner::OnRBMode(MM::PropertyBase* pProp, MM::ActionType eAct)
          tmp = 3;
       else
          return DEVICE_INVALID_PROPERTY_VALUE;
-      command << addressChar_ << ((firmwareVersion_ < 2.885) ? "RM X=" : "RM F=") << tmp;
+      command << addressChar_ << "RM " << pseudoAxisChar << "=" << tmp;
       RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A"));
    }
    return DEVICE_OK;
@@ -3092,15 +3361,17 @@ int CScanner::OnRBTrigger(MM::PropertyBase* pProp, MM::ActionType eAct)
 int CScanner::OnRBRunning(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    ostringstream command; command.str("");
+   ostringstream response; response.str("");
+   string pseudoAxisChar = FirmwareVersionAtLeast(2.89) ? "F" : "X";
    long tmp = 0;
    if (eAct == MM::BeforeGet)
    {
       if (!refreshProps_ && initialized_ && !refreshOverride_)
          return DEVICE_OK;
       refreshOverride_ = false;
-      command << addressChar_ << ((firmwareVersion_ < 2.885) ? "RM X?" : "RM F?");
-      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(),
-            (firmwareVersion_ < 2.885) ? ":A X=" : ":A F="));
+      command << addressChar_ << "RM " << pseudoAxisChar << "?";
+      response << ":A " << pseudoAxisChar << "=";
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()) );
       RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
       bool success;
       if (tmp >= 128)
@@ -3140,6 +3411,63 @@ int CScanner::OnRBDelayBetweenPoints(MM::PropertyBase* pProp, MM::ActionType eAc
       pProp->Get(tmp);
       command << addressChar_ << "RT Z=" << tmp;
       RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+   }
+   return DEVICE_OK;
+}
+
+int CScanner::OnTargetExposureTime(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   ostringstream command; command.str("");
+   long tmp = 0;
+   if (eAct == MM::BeforeGet)
+   {
+      if (!refreshProps_ && initialized_)
+         return DEVICE_OK;
+      command << addressChar_ << "RT Y?";
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A Y="));
+      RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
+      if (!pProp->Set(tmp))
+         return DEVICE_INVALID_PROPERTY_VALUE;
+      targetExposure_ = tmp;
+   }
+   else if (eAct == MM::AfterSet) {
+      pProp->Get(tmp);
+      // make sure we don't set it below 1 because the firmware can get confused
+      if (tmp < 1L)
+      {
+         pProp->Set(1L);
+         tmp = 1;
+      }
+      command << addressChar_ << "RT Y=" << tmp;
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      targetExposure_ = tmp;
+   }
+   return DEVICE_OK;
+}
+
+int CScanner::OnTargetSettlingTime(MM::PropertyBase* pProp, MM::ActionType eAct)
+// same as CXYStage::OnWaitTime()
+{
+   ostringstream command; command.str("");
+   ostringstream response; response.str("");
+   long tmp = 0;
+   if (eAct == MM::BeforeGet)
+   {
+      if (!refreshProps_ && initialized_)
+         return DEVICE_OK;
+      command << "WT " << axisLetterX_ << "?";
+      response << ":" << axisLetterX_ << "=";
+      RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), response.str()));
+      RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
+      if (!pProp->Set(tmp))
+         return DEVICE_INVALID_PROPERTY_VALUE;
+      targetSettling_ = tmp;
+   }
+   else if (eAct == MM::AfterSet) {
+      pProp->Get(tmp);
+      command << "WT " << axisLetterX_ << "=" << tmp << " " << axisLetterY_ << "=" << tmp;
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      targetSettling_ = tmp;
    }
    return DEVICE_OK;
 }

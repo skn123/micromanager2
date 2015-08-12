@@ -19,7 +19,7 @@
 // AUTHOR:        Nenad Amodaj, nenad@amodaj.com, 10/26/2005
 //                Nico Stuurman, Oct. 2010
 //
-// CVS:           $Id: SutterLambda.h 13358 2014-05-09 02:48:15Z mark $
+// CVS:           $Id: SutterLambda.h 15568 2015-06-30 00:17:16Z nico $
 //
 
 #ifndef _SUTTER_LAMBDA_H_
@@ -94,6 +94,7 @@ public:
    int OnSpeed(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnDelay(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnBusy(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnAnswerTimeout(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
    bool SetWheelPosition(unsigned pos);
