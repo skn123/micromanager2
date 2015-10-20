@@ -49,6 +49,7 @@ public:
    std::string GetPort(std::string line);
 
    int OnTriggeringEnabled(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnSampleRate(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSupportsTriggering(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnInputTrigger(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSequenceLength(MM::PropertyBase* pProp, MM::ActionType eAct);
@@ -68,8 +69,12 @@ protected:
    std::string deviceName_;
    // Output line or lines to use.
    std::string channel_;
+   // Auto-detected output port to use.
+   std::string port_;
    // Input line to listen on for hardware triggers.
    std::string inputTrigger_;
+   // Frequency at which to sample the input trigger line.
+   long samplesPerSec_;
    // The user has allowed triggering to happen.
    bool isTriggeringEnabled_;
    // Our current configuration is physically capable of
@@ -82,7 +87,6 @@ protected:
    bool amPreparedToTrigger_;
 
 private:
-   static const int SAMPLES_PER_SEC = 1000;
    MM::Core* core_;
    MM::Device* device_;
 };
@@ -136,6 +140,7 @@ public:
    // action interface
    // ----------------
    int OnChannel(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnPort(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnVolts(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnPercent(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnMinVolts(MM::PropertyBase* pProp, MM::ActionType eAct);
@@ -186,6 +191,7 @@ public:
    // ----------------
    int OnState(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnChannel(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnPort(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnSequenceLength(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:

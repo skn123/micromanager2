@@ -120,7 +120,7 @@ int CScanner::Initialize()
    // set controller card to return positions with 1 decimal places (3 is max allowed currently, units are millidegrees)
    command.str("");
    command << addressChar_ << "VB Z=1";
-   RETURN_ON_MM_ERROR ( hub_->QueryCommand(command.str()) );
+   RETURN_ON_MM_ERROR ( hub_->QueryCommand(command.str()) );  // special case, no :A returned
 
    // create MM description; this doesn't work during hardware configuration wizard but will work afterwards
    command.str("");
@@ -379,12 +379,13 @@ int CScanner::Initialize()
 
    // turn the beam on and off
    // need to do this after finding the correct value for mmTarget_
+   // also after creating single-axis properties which we use when turning off beam
    pAct = new CPropertyAction (this, &CScanner::OnBeamEnabled);
    CreateProperty(g_ScannerBeamEnabledPropertyName, g_NoState, MM::String, false, pAct);
    AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_NoState);
    AddAllowedValue(g_ScannerBeamEnabledPropertyName, g_YesState);
-   UpdateIlluminationState();
    UpdateProperty(g_ScannerBeamEnabledPropertyName);
+   UpdateIlluminationState();
    // always start with the beam off for safety
    SetProperty(g_ScannerBeamEnabledPropertyName, g_NoState);
 
@@ -727,35 +728,64 @@ int CScanner::SetIlluminationStateHelper(bool on)
       return DEVICE_OK;
    if(!laserTTLenabled_)
       return DEVICE_OK;
-   // need to know whether other scanner device is turned on => must query it anyway
-   // would be nice if there was some way this information could be stored in hub object
-   // and cut down on serial communication
-   command << addressChar_ << "LED X?";
-   RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),"X=") );
-   RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
-   tmp &= 0x03;  // strip all but the two LSBs
-   if (laser_side_ == 1)
-   {
-      if(on)
-         tmp |= 0x01;
-      else
-         tmp &= ~0x01;
-   }
-   else if (laser_side_ == 2)
-   {
-      if(on)
-         tmp |= 0x02;
-      else
-         tmp &= ~0x02;
-   }
-   else
+   if (laser_side_ != 1 && laser_side_ != 2)
    {
       // should only get here if laser_side_ didn't get properly read somehow
       return DEVICE_OK;
    }
-   command.str("");
-   command << addressChar_ << "LED X=" << tmp;
-   RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+   // starting with firmware v3.11 we have way of setting laser state without querying
+   // other scanner device on same card
+   if (FirmwareVersionAtLeast(3.11))
+   {
+      command.str("");
+      if (laser_side_ == 1)
+      {
+
+      }
+      else
+      {
+
+      }
+      command << addressChar_ << "LED ";
+      if (laser_side_ == 1)
+         command << "R";
+      else
+         command << "T";
+      command << "=";
+      if (on)
+         command << "1";
+      else
+         command << "0";
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+   }
+   else
+   {
+      // need to know whether other scanner device is turned on => must query it
+      // would be nice if there was some way this information could be stored in hub object
+      // and cut down on serial communication
+      command << addressChar_ << "LED X?";
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),"X=") );
+      RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterEquals(tmp) );
+      tmp &= 0x03;  // strip all but the two LSBs
+      if (laser_side_ == 1)
+      {
+         if(on)
+            tmp |= 0x01;
+         else
+            tmp &= ~0x01;
+      }
+      else
+      {
+         if(on)
+            tmp |= 0x02;
+         else
+            tmp &= ~0x02;
+      }
+
+      command.str("");
+      command << addressChar_ << "LED X=" << tmp;
+      RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(),":A") );
+   }
    return DEVICE_OK;
 }
 
@@ -796,8 +826,18 @@ int CScanner::SetIlluminationState(bool on)
       {
          // stop any single-axis action happening first; should go to position before single-axis was started
          // firmware will stop single-axis actions anyway but this gives us the right position
-         SetProperty(g_SAModeXPropertyName, g_SAMode_0);
-         SetProperty(g_SAModeYPropertyName, g_SAMode_0);
+         char SAModeX[MM::MaxStrLength];
+         RETURN_ON_MM_ERROR ( GetProperty(g_SAModeXPropertyName, SAModeX) );
+         if (strcmp(SAModeX, g_SAMode_0) != 0 )
+         {
+            SetProperty(g_SAModeXPropertyName, g_SAMode_0);
+         }
+         char SAModeY[MM::MaxStrLength];
+         RETURN_ON_MM_ERROR ( GetProperty(g_SAModeYPropertyName, SAModeY) );
+         if (strcmp(SAModeY, g_SAMode_0) != 0 )
+         {
+            SetProperty(g_SAModeYPropertyName, g_SAMode_0);
+         }
          GetPosition(lastX_, lastY_);  // read and store pre-off position so we can undo
          illuminationState_ = false;
          ostringstream command; command.str("");
@@ -873,13 +913,10 @@ int CScanner::RunPolygons()
       illuminationState_ = true;
       RETURN_ON_MM_ERROR ( SetIlluminationStateHelper(true) );
 
-      ostringstream command; command.str("");
-      command << addressChar_ << "RM";
-
       // trigger ring buffer requested number of times, sleeping until done
       // TODO support specified # of repeats in firmware directly
       for (int j=0; j<polygonRepetitions_; ++j) {
-         hub_->QueryCommandVerify(command.str(), ":A");
+         RETURN_ON_MM_ERROR ( SetProperty(g_RB_TriggerPropertyName, g_DoItState) );
          bool done = false;
          do {
             char propValue[MM::MaxStrLength];
@@ -928,7 +965,7 @@ int CScanner::RunSequence()
       // should consider ensuring that RM Y is set appropriately with axisIndexX_ and axisIndexY_
 
       // note that this simply sends a trigger, which will also turn it off if it's currently running
-      SetProperty(g_RB_TriggerPropertyName, g_DoItState);
+      RETURN_ON_MM_ERROR ( SetProperty(g_RB_TriggerPropertyName, g_DoItState) );
       return DEVICE_OK;
    }
    else

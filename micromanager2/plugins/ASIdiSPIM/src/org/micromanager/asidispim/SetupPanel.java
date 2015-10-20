@@ -36,8 +36,10 @@ import org.micromanager.asidispim.Data.MyStrings;
 import org.micromanager.asidispim.Data.Positions;
 import org.micromanager.asidispim.Data.Prefs;
 import org.micromanager.asidispim.Data.Properties;
+import org.micromanager.asidispim.Utils.DevicesListenerInterface;
 import org.micromanager.asidispim.Utils.ListeningJPanel;
 import org.micromanager.asidispim.Utils.MyDialogUtils;
+import org.micromanager.asidispim.Utils.MyNumberUtils;
 import org.micromanager.asidispim.Utils.PanelUtils;
 import org.micromanager.asidispim.Utils.StagePositionUpdater;
 import org.micromanager.asidispim.Utils.StoredFloatLabel;
@@ -49,12 +51,10 @@ import net.miginfocom.swing.MigLayout;
 import org.micromanager.MMStudio;
 import org.micromanager.api.ScriptInterface;
 import org.micromanager.asidispim.Utils.AutofocusUtils;
+import org.micromanager.asidispim.api.ASIdiSPIMException;
 import org.micromanager.internalinterfaces.LiveModeListener;
 import org.micromanager.utils.MMFrame;
-<<<<<<< HEAD
-=======
 import org.micromanager.utils.ReportingUtils;
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
 
 /**
  *
@@ -62,11 +62,12 @@ import org.micromanager.utils.ReportingUtils;
  * @author Jon
  */
 @SuppressWarnings("serial")
-public final class SetupPanel extends ListeningJPanel implements LiveModeListener {
+public final class SetupPanel extends ListeningJPanel implements LiveModeListener, DevicesListenerInterface {
 
    private final Devices devices_;
    private final Properties props_;
    private final Joystick joystick_;
+   private final Devices.Sides side_;
    private final Positions positions_;
    private final Cameras cameras_;
    private final AutofocusUtils autofocus_;
@@ -86,7 +87,6 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
    private double imagingPiezoStartPos_;
    private double imagingPiezoStopPos_;
    private double imagingCenterPos_;
-   private Point2D.Double xyCenterPos_;
    private double sliceStartPos_;
    private double sliceStopPos_;
    private final JCheckBox illumPiezoHomeEnable_;
@@ -108,7 +108,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
            Devices devices, 
            Properties props, 
            Joystick joystick, 
-           final Devices.Sides side, 
+           Devices.Sides side, 
            Positions positions, 
            Cameras cameras, 
            Prefs prefs, 
@@ -117,12 +117,13 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       super(MyStrings.PanelNames.SETUP.toString() + side.toString(),
               new MigLayout(
               "",
-              "[center]8[center]",
+              "8[center]8[center]0",
               "[]16[]16[]"));
       
       devices_ = devices;
       props_ = props;
       joystick_ = joystick;
+      side_ = side;
       positions_ = positions;
       cameras_ = cameras;
       autofocus_ = autofocus;
@@ -132,9 +133,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       PanelUtils pu = new PanelUtils(prefs_, props_, devices);
       final SetupPanel setupPanel = this;
 
-      piezoImagingDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.PIEZOA, side);
-      piezoIlluminationDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.PIEZOA, Devices.getOppositeSide(side));
-      micromirrorDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.GALVOA, side);
+      updateKeyAssignments();
 
       sheetStartPositionLabel_ = new StoredFloatLabel(panelName_, 
               Properties.Keys.PLUGIN_SHEET_START_POS.toString(), -0.5f,
@@ -196,10 +195,12 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       
       calibrationPanel.add(new JLabel("Slope: "));
       calibrationPanel.add(rateField_, "span 2, right");
-      // TODO make calibration be in degrees instead of um
+      // TODO consider making calibration be in degrees instead of um
+      // originally thought it was best, now not sure because um gives
+      // user an idea of the drift and is convenient for autofocus inputs
       // calibrationPanel.add(new JLabel("\u00B0/\u00B5m"));
       calibrationPanel.add(new JLabel("\u00B5m/\u00B0"));
-      tmp_but = new JButton("Update");
+      tmp_but = new JButton("2-point");
       tmp_but.setMargin(new Insets(4,8,4,8));
       tmp_but.setToolTipText("Computes piezo vs. slice slope and offset from start and end positions");
       tmp_but.addActionListener(new ActionListener() {
@@ -235,26 +236,19 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       calibrationPanel.add(piezoDeltaField_);
       calibrationPanel.add(new JLabel("\u00B5m"));
       
-      tmp_but = new JButton("Focus");
+      tmp_but = new JButton("Run Autofocus");
       tmp_but.setMargin(new Insets(4,8,4,8));
       tmp_but.setToolTipText("Autofocus at current piezo position");
       tmp_but.setBackground(Color.green);
       tmp_but.addActionListener(new ActionListener() {
          @Override
          public void actionPerformed(ActionEvent e) {
-            autofocus_.runFocus(setupPanel, side, true,
+            autofocus_.runFocus(setupPanel, side_, true,
                     ASIdiSPIM.getFrame().getAcquisitionPanel().getSliceTiming(),
-<<<<<<< HEAD
                     true, true);
          }
       });
       calibrationPanel.add(tmp_but, "center, span 3");
-=======
-                    true);
-         }
-      });
-      calibrationPanel.add(tmp_but, "center, span 3, wrap");
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       
       // start 2-point calibration frame
       // this frame is separate from main plugin window
@@ -378,19 +372,15 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       });
       slopeCalibrationPanel.add(tmp_but, "span 5, split 3");
       
-      tmp_but = new JButton("Focus");
+      tmp_but = new JButton("Run Autofocus");
       tmp_but.setToolTipText("Autofocus at current piezo position");
       tmp_but.setBackground(Color.green);
       tmp_but.addActionListener(new ActionListener() {
          @Override
          public void actionPerformed(ActionEvent e) {
-            autofocus_.runFocus(setupPanel, side, true,
+            autofocus_.runFocus(setupPanel, side_, true,
                     ASIdiSPIM.getFrame().getAcquisitionPanel().getSliceTiming(),
-<<<<<<< HEAD
                     true, true);
-=======
-                    true);
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
          }
       });
       slopeCalibrationPanel.add(tmp_but);
@@ -429,7 +419,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       
       // initialize the center position variable
       imagingCenterPos_ = prefs_.getFloat(
-            MyStrings.PanelNames.SETUP.toString() + side.toString(), 
+            MyStrings.PanelNames.SETUP.toString() + side_.toString(), 
             Properties.Keys.PLUGIN_PIEZO_CENTER_POS, 0);
       
       
@@ -450,8 +440,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          @Override
          public void actionPerformed(ActionEvent e) {
             try {
-               imagingCenterPos_ = positions_.getUpdatedPosition(piezoImagingDeviceKey_); 
-               imagingCenterPosLabel_.setFloat((float)imagingCenterPos_);
+               setImagingCenter(positions_.getUpdatedPosition(piezoImagingDeviceKey_));
             } catch (Exception ex) {
                MyDialogUtils.showError(ex);
             }
@@ -459,45 +448,6 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       });
       slicePanel.add(tmp_but, "wrap");
       
-<<<<<<< HEAD
-=======
-      slicePanel.add(new JLabel("XY center: "));
-      slicePanel.add(new JLabel(""));   // TODO update this label with current value
-      
-      tmp_but = new JButton("Go");
-      tmp_but.setToolTipText("Moves XY stage to specified center");
-      tmp_but.addActionListener(new ActionListener() {
-         @Override
-         public void actionPerformed(ActionEvent e) {
-            // TODO replace with positions_ call to 2D position set (need to implement still)
-            try {
-               core_.setXYPosition(xyCenterPos_.x, xyCenterPos_.y);
-            } catch (Exception ex) {
-               ReportingUtils.showError(ex);
-            }
-         }
-      } );
-      slicePanel.add(tmp_but);
-      
-      tmp_but = new JButton("Set");
-      tmp_but.setToolTipText("Sets XY center position for acquisition");
-      tmp_but.setBackground(Color.red);
-      tmp_but.addActionListener(new ActionListener() {
-
-         @Override
-         public void actionPerformed(ActionEvent e) {
-         // TODO replace with positions_ call to 2D position set (need to implement still)
-            try {
-               xyCenterPos_ = core_.getXYStagePosition(
-                     devices_.getMMDeviceException(Devices.Keys.XYSTAGE));
-            } catch (Exception ex) {
-               MyDialogUtils.showError(ex);
-            }
-         }
-      });
-      slicePanel.add(tmp_but, "wrap");
-      
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       slicePanel.add(new JSeparator(SwingConstants.HORIZONTAL), "span 5, growx, shrinky, wrap");
       
       slicePanel.add(new JLabel("Slice position:"));
@@ -528,11 +478,7 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
             positions_.setPosition(piezoImagingDeviceKey_, 0.0, true);
          }
       } );
-<<<<<<< HEAD
       slicePanel.add(tmp_but);
-=======
-      slicePanel.add(tmp_but, "wrap");
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
 
       
       // Create sheet controls
@@ -573,8 +519,11 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
          @Override
          public void actionPerformed(ActionEvent e) {
             if (devices_.isValidMMDevice(piezoIlluminationDeviceKey_)) {
-               props_.setPropValue(piezoIlluminationDeviceKey_,
-                     Properties.Keys.MOVE_TO_HOME, Properties.Values.DO_IT);
+               try {
+                  gui_.getMMCore().home(devices_.getMMDevice(piezoIlluminationDeviceKey_));
+               } catch (Exception e1) {
+                  ReportingUtils.showError(e1, "Could not move piezo to home");
+               }
             }
          }
       });
@@ -584,9 +533,9 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
             Properties.Keys.PREFS_ENABLE_ILLUM_PIEZO_HOME, panelName_, false); 
       sheetPanel.add(illumPiezoHomeEnable_, "span 3, wrap");
 
-
+      // TODO calibrate the sheet axis and then set according to ROI and Bessel filter
       sheetPanel.add(new JLabel("Sheet width:"));
-      sheetPanel.add(new JLabel(""), "span 2");   // TODO update this label with current value and/or allow user to directly enter value
+      sheetPanel.add(new JLabel(""), "span 2");
       sheetPanel.add(makeIncrementButton(micromirrorDeviceKey_,
             Properties.Keys.SA_AMPLITUDE_X_DEG, "-", (float)-0.01),
             "split 2");
@@ -598,7 +547,6 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
               1000, // the scale factor between internal integer representation and float representation
               micromirrorDeviceKey_, Properties.Keys.SA_AMPLITUDE_X_DEG);
       sheetPanel.add(tmp_sl, "span 5, growx, center, wrap");
-
 
       sheetPanel.add(new JLabel("Sheet offset:"));
       sheetPanel.add(new JLabel(""), "span 2");   // TODO update this label with current value and/or allow user to directly enter value
@@ -639,50 +587,59 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       superPanel.add(sheetPanel, "span 3");
 
       // Layout of the SetupPanel
-      joystickPanel_ = new JoystickSubPanel(joystick_, devices_, panelName_, side, 
-              prefs_);
+      joystickPanel_ = new JoystickSubPanel(joystick_, devices_, panelName_, side_, prefs_);
       add(joystickPanel_, "center");
 
       add(superPanel, "center, aligny top, span 1 3, wrap");
 
-      beamPanel_ = new BeamSubPanel(gui_, devices_, panelName_, side, prefs_, props_);
+      beamPanel_ = new BeamSubPanel(gui_, devices_, panelName_, side_, prefs_, props_);
       add(beamPanel_, "center, wrap");
 
-      cameraPanel_ = new CameraSubPanel(gui_, cameras_, devices_, panelName_, 
-              side, prefs_, true);
+      cameraPanel_ = new CameraSubPanel(gui_, cameras_, devices_, panelName_, side_, prefs_);
       add(cameraPanel_, "center");
 
    }// end of SetupPanel constructor
 
    /**
     * Performs "1-point" calibration updating the offset
-    * but not the slope.
+    * (but not the slope) based on current piezo/galvo positions.
     */
    private void updateCalibrationOffset() {
       try {
-         double rate = (Double) rateField_.getValue();
-         // bypass cached positions in positions_ in case they aren't current
-         double currentScanner = positions_.getUpdatedPosition(micromirrorDeviceKey_,
-               Directions.Y);
-         double currentPiezo = positions_.getUpdatedPosition(piezoImagingDeviceKey_);
-         double newOffset = currentPiezo - rate * currentScanner;
-         offsetField_.setValue((Double) newOffset);
+         if (beamPanel_.isBeamAOn()) {
+            // only update offset if the beam is turned on
+            //  (if it's off then the current position is meaningless)
+            double rate = (Double) rateField_.getValue();
+            // bypass cached positions in positions_ in case they aren't current
+            double currentScanner = positions_.getUpdatedPosition(micromirrorDeviceKey_,
+                  Directions.Y);
+            double currentPiezo = positions_.getUpdatedPosition(piezoImagingDeviceKey_);
+            double newOffset = currentPiezo - rate * currentScanner;
+            offsetField_.setValue((Double) newOffset);
+         }
       } catch (Exception ex) {
          MyDialogUtils.showError(ex);
       }
    }
-<<<<<<< HEAD
-
+   
    /**
-    * Give autofocus and acquisition the opportunity to update the offset
+    * Give autofocus and acquisition the opportunity to update the offset.
+    * Only happens if the focus is deemed a "success" by autofocus
+    * (currently means R^2 value is sufficiently high and best focus
+    * position is in the middle 80% of the range sampled)
     * @param newValue - new value for the piezo/slice calibration offset
     */
-   public void updateCalibrationOffset(double newValue) {
-      offsetField_.setValue(newValue);
+   public void updateCalibrationOffset(AutofocusUtils.FocusResult score) {
+      if (!score.getFocusSuccess()) {
+         ReportingUtils.logMessage("autofocus offset for side " + side_ + " not updated because focus not successful");
+         return;
+      }
+      double rate = (Double) rateField_.getValue();
+      double newOffset = score.getPiezoPosition() - rate * score.getGalvoPosition();         
+      offsetField_.setValue((Double) newOffset);
+      ReportingUtils.logMessage("autofocus updated offset for side " + side_ + "; new value is " + newOffset);
    }
-=======
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
-   
+
    /**
     * Performs "2-point" calibration updating the offset and slope.
     * Pops up a sub-window.
@@ -821,8 +778,11 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       // moves illumination piezo to home
       if (illumPiezoHomeEnable_.isSelected() && 
             devices_.isValidMMDevice(piezoIlluminationDeviceKey_)) {
-         props_.setPropValue(piezoIlluminationDeviceKey_,
-               Properties.Keys.MOVE_TO_HOME, Properties.Values.DO_IT);
+         try {
+            gui_.getMMCore().home(devices_.getMMDevice(piezoIlluminationDeviceKey_));
+         } catch (Exception e) {
+            ReportingUtils.showError(e, "could not move illumination piezo to home");
+         }
       }
       
       // set scan waveform to be triangle
@@ -844,9 +804,25 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
    }
    
    @Override
-   public void refreshSelected() {  // called after autofocus
+   // if this gets called other than after autofocus may need to change code
+   public void refreshSelected() {
+      // currently only called after autofocus, so do an autofocus-specific task here
+      // cannot put this where we call runFocus because it runs on a separate
+      //   asynchronous thread
+      // be sure to update the calibration offset if needed before possibly
+      //   changing beam state using beamPanel_
+      if (prefs_.getBoolean(MyStrings.PanelNames.AUTOFOCUS.toString(), 
+            Properties.Keys.PLUGIN_AUTOFOCUS_AUTOUPDATE_OFFSET, false)) {
+         updateCalibrationOffset();
+      }
       cameraPanel_.gotSelected();
-      beamPanel_.gotSelected();
+      if (beamPanel_.isUpdateOnTab()) {
+         beamPanel_.gotSelected();
+      } else {
+         // correctly handle case where beam was initially turned off, then turned
+         //   on by autofocus, but "Change settings on tab activate" is false
+         beamPanel_.setBeamA(false);
+      }
    }
    
    @Override
@@ -854,4 +830,31 @@ public final class SetupPanel extends ListeningJPanel implements LiveModeListene
       slopeCalibrationFrame_.savePosition();
       slopeCalibrationFrame_.dispose();
    }
+   
+   private void updateKeyAssignments() {
+      piezoImagingDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.PIEZOA, side_);
+      piezoIlluminationDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.PIEZOA, Devices.getOppositeSide(side_));
+      micromirrorDeviceKey_ = Devices.getSideSpecificKey(Devices.Keys.GALVOA, side_);
+   }
+   
+   @Override
+   public void devicesChangedAlert() {
+      updateKeyAssignments();
+   }
+
+   public double getImagingCenter() {
+      return imagingCenterPos_;
+   }
+
+   public void setImagingCenter(double center) throws ASIdiSPIMException {
+      if (MyNumberUtils.outsideRange(center,
+            props_.getPropValueFloat(piezoImagingDeviceKey_, Properties.Keys.UPPER_LIMIT)*1000,
+            props_.getPropValueFloat(piezoImagingDeviceKey_, Properties.Keys.LOWER_LIMIT)*1000)) {
+         throw new ASIdiSPIMException("Cannot set imaging center outside the range of the imaging piezo");
+      }
+      imagingCenterPos_ = center;
+      imagingCenterPosLabel_.setFloat((float)imagingCenterPos_);
+   }
+
+   
 }

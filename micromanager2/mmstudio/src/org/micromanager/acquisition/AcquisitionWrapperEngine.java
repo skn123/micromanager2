@@ -29,6 +29,7 @@ import org.micromanager.api.SequenceSettings;
 import org.micromanager.events.EventManager;
 import org.micromanager.events.PipelineEvent;
 import org.micromanager.events.ProcessorEvent;
+import org.micromanager.events.SummaryMetadataEvent;
 import org.micromanager.internalinterfaces.AcqSettingsListener;
 import org.micromanager.utils.AcqOrderMode;
 import org.micromanager.utils.AutofocusManager;
@@ -78,6 +79,7 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
    protected ImageCache imageCache_;
    private ArrayList<AcqSettingsListener> settingsListeners_;
    private AcquisitionManager acqManager_;
+   private int cameraTimeout_ = 20000;
 
    public AcquisitionWrapperEngine(AcquisitionManager mgr) {
       nameToProcessorClass_ = new HashMap<String, Class<? extends DataProcessor<TaggedImage>>>();
@@ -155,6 +157,8 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
                  studio_.getPositionList(),
                  studio_.getAutofocusManager().getDevice());
          summaryMetadata_ = getAcquisitionEngine2010().getSummaryMetadata();
+         org.micromanager.events.EventManager.post(
+               new SummaryMetadataEvent(summaryMetadata_));
 
          // Run the Acquisition Engine output through a pipeline of ImageProcessors
          BlockingQueue<TaggedImage> procStackOutputQueue = ProcessorStack.run(
@@ -378,7 +382,7 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
 
       // Frames
       if (useFrames_) {
-         if (useCustomIntervals_) {
+         if (useCustomIntervals_ && customTimeIntervalsMs_ != null) {
             acquisitionSettings.customIntervalsMs = customTimeIntervalsMs_;
             acquisitionSettings.numFrames = acquisitionSettings.customIntervalsMs.size();
          } else {
@@ -444,6 +448,7 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
       }
       acquisitionSettings.comment = comment_;
       acquisitionSettings.usePositionList = this.useMultiPosition_;
+      acquisitionSettings.cameraTimeout = cameraTimeout_;
       return acquisitionSettings;
    }
 
@@ -453,10 +458,12 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
 
       // Frames
       useFrames_ = true;
-      if (useCustomIntervals_) {
+      if (ss.customIntervalsMs != null && ss.customIntervalsMs.size() > 0) {
+         useCustomIntervals_ = true;
          customTimeIntervalsMs_ = ss.customIntervalsMs;
          numFrames_ = ss.customIntervalsMs.size();
       } else {
+         useCustomIntervals_ = false;
          numFrames_ = ss.numFrames;
          interval_ = ss.intervalMs;
       }
@@ -518,6 +525,7 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
       comment_ = ss.comment;
       
       useMultiPosition_ = ss.usePositionList;
+      cameraTimeout_ = ss.cameraTimeout;
    }
 
 //////////////////// Actions ///////////////////////////////////////////
@@ -994,7 +1002,7 @@ public class AcquisitionWrapperEngine implements AcquisitionEngine {
       long totalMB = getTotalMB();
 
       double totalDurationSec = 0;
-      if (!useCustomIntervals_) {
+      if (!useCustomIntervals_ || customTimeIntervalsMs_ == null) {
          totalDurationSec = interval_ * numFrames / 1000.0;
       } else {
          for (Double d : customTimeIntervalsMs_) {

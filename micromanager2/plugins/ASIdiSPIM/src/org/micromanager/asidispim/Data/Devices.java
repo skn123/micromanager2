@@ -97,6 +97,8 @@ public class Devices {
    public final static Set<Devices.Keys> STAGES1D = EnumSet.of(
          Devices.Keys.LOWERZDRIVE, Devices.Keys.UPPERZDRIVE,
          Devices.Keys.PIEZOA, Devices.Keys.PIEZOB);
+   public final static Set<Devices.Keys> PIEZOS = EnumSet.of(
+         Devices.Keys.PIEZOA, Devices.Keys.PIEZOB);
    public final static Set<Devices.Keys> STAGES2D = EnumSet.of(
          Devices.Keys.XYSTAGE, Devices.Keys.GALVOA, Devices.Keys.GALVOB);
    public final static Set<Devices.Keys> GALVOS = EnumSet.of(
@@ -477,8 +479,8 @@ public class Devices {
       case GALVOA:
       case GALVOB:
          switch (dir) {
-         case X: ret += ", sheet"; break;
-         case Y: ret += ", slice"; break;
+         case X: ret += " Sheet"; break;
+         case Y: ret += " Slice"; break;
          default: break;
          }
          break;
@@ -519,9 +521,9 @@ public class Devices {
       case GALVOA:
       case GALVOB:
         if (side == d.side) {
-           ret = "Imaging Beam";
+           ret = "Imaging";
         } else if (side == Devices.getOppositeSide(d.side)) {
-           ret = "Epi Beam";
+           ret = "Epi";
         } else {
            ret = getDeviceDisplay(key);
         }

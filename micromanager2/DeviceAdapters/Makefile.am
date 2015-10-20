@@ -88,6 +88,7 @@ SUBDIRS = \
 	Aquinas \
 	Arduino \
 	CARVII \
+	CNCMicroscope \
 	CSUW1 \
 	Cobolt \
 	CoherentCube \
@@ -113,6 +114,7 @@ SUBDIRS = \
 	MaestroServo \
 	Marzhauser \
 	Marzhauser-LStep \
+	MarzhauserLStepOld \
 	MicroPoint \
 	Motic_mac \
 	Neos \

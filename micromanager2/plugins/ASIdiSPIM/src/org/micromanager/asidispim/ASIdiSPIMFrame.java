@@ -31,6 +31,7 @@ import org.micromanager.asidispim.Data.Prefs;
 import org.micromanager.asidispim.Data.Properties;
 import org.micromanager.asidispim.Utils.ListeningJPanel;
 import org.micromanager.asidispim.Utils.ListeningJTabbedPane;
+import org.micromanager.asidispim.Utils.MyDialogUtils;
 
 import java.awt.Container;
 import java.util.prefs.Preferences;
@@ -45,7 +46,9 @@ import org.micromanager.api.ScriptInterface;
 import org.micromanager.MMStudio;
 import org.micromanager.asidispim.Utils.AutofocusUtils;
 import org.micromanager.asidispim.Utils.ControllerUtils;
+
 import static org.micromanager.asidispim.Utils.MyJavaUtils.isMac;
+
 import org.micromanager.asidispim.Utils.StagePositionUpdater;
 import org.micromanager.internalinterfaces.LiveModeListener; 
 import org.micromanager.utils.MMFrame;
@@ -63,8 +66,7 @@ import org.micromanager.utils.MMFrame;
 //TODO make it easy to look through series of data sets
 //TODO hardware Z-projection
 //TODO camera control tab: set ROI, set separate acquisition/alignment exposure times and sweep rate, etc.
-//TODO track Z/F for sample finding
-//TODO Z/F position dropdown for often-used positions
+//TODO method to move sample diagonally (move X and F at same time) for sample finding
 //TODO factor out common code for JComboBoxes like MulticolorModes, CameraModes, AcquisitionModes, etc.
 //TODO cleanup prefs vs. props... maybe add boolean support for plugin device use only?
 //TODO finish eliminating Prefs.Keys in favor of Properties.Keys with plugin values
@@ -72,6 +74,10 @@ import org.micromanager.utils.MMFrame;
 //TODO improve efficiency of camera code by pre-calculating key factors and updating when needed instead of calculating every time
 //TODO add check for correct Hamamatsu model
 //TODO execute autofocus during acquisition before the desired time point is reached instead of waiting until a timepoint should be collected
+//       or else do autofocus after acquisition instead of before
+//TODO smart default joystick settings (e.g. different defaults different panels/wheels)
+//TODO easily take "test acquisition" that wouldn't need to be saved, only do 1 timepoint, etc. From both acquisition and setup tabs (setup tab would only do that side)
+//TODO calculate and show estimated disk space as part of "durations"
 
 
 /**
@@ -83,6 +89,7 @@ import org.micromanager.utils.MMFrame;
 public class ASIdiSPIMFrame extends MMFrame  
       implements MMListenerInterface {
    
+   private final ScriptInterface gui_;
    private final Properties props_; 
    private final Prefs prefs_;
    private final Devices devices_;
@@ -114,35 +121,36 @@ public class ASIdiSPIMFrame extends MMFrame
    public ASIdiSPIMFrame(ScriptInterface gui)  {
 
       // create interface objects used by panels
+      gui_ = gui;
       prefs_ = new Prefs(Preferences.userNodeForPackage(this.getClass()));
-      devices_ = new Devices(gui, prefs_);
-      props_ = new Properties(gui, devices_, prefs_);
-      positions_ = new Positions(gui, devices_);
+      devices_ = new Devices(gui_, prefs_);
+      props_ = new Properties(gui_, devices_, prefs_);
+      positions_ = new Positions(gui_, devices_);
       joystick_ = new Joystick(devices_, props_);
-      cameras_ = new Cameras(gui, devices_, props_, prefs_);
-      controller_ = new ControllerUtils(gui, props_, prefs_, devices_, positions_);
+      cameras_ = new Cameras(gui_, devices_, props_, prefs_);
+      controller_ = new ControllerUtils(gui_, props_, prefs_, devices_, positions_);
       
       // create the panels themselves
       // in some cases dependencies create required ordering
-      devicesPanel_ = new DevicesPanel(gui, devices_, props_);
+      devicesPanel_ = new DevicesPanel(gui_, devices_, props_);
       stagePosUpdater_ = new StagePositionUpdater(positions_, props_);  // needed for setup and navigation
       
-      autofocus_ = new AutofocusUtils(gui, devices_, props_, prefs_,
+      autofocus_ = new AutofocusUtils(gui_, devices_, props_, prefs_,
             cameras_, stagePosUpdater_, positions_, controller_);
       
-      acquisitionPanel_ = new AcquisitionPanel(gui, devices_, props_, joystick_, 
-            cameras_, prefs_, stagePosUpdater_, positions_, controller_, autofocus_);
-      setupPanelA_ = new SetupPanel(gui, devices_, props_, joystick_, 
+      acquisitionPanel_ = new AcquisitionPanel(gui_, devices_, props_, cameras_, 
+            prefs_, stagePosUpdater_, positions_, controller_, autofocus_);
+      setupPanelA_ = new SetupPanel(gui_, devices_, props_, joystick_, 
             Devices.Sides.A, positions_, cameras_, prefs_, stagePosUpdater_,
             autofocus_);
-      setupPanelB_ = new SetupPanel(gui, devices_, props_, joystick_,
+      setupPanelB_ = new SetupPanel(gui_, devices_, props_, joystick_,
             Devices.Sides.B, positions_, cameras_, prefs_, stagePosUpdater_,
             autofocus_);
-      navigationPanel_ = new NavigationPanel(gui, devices_, props_, joystick_,
+      navigationPanel_ = new NavigationPanel(gui_, devices_, props_, joystick_,
             positions_, prefs_, cameras_, stagePosUpdater_);
 
-      dataAnalysisPanel_ = new DataAnalysisPanel(gui, prefs_);
-      autofocusPanel_ = new AutofocusPanel(gui, devices_, props_, prefs_, autofocus_);
+      dataAnalysisPanel_ = new DataAnalysisPanel(gui_, prefs_);
+      autofocusPanel_ = new AutofocusPanel(gui_, devices_, props_, prefs_, autofocus_);
       settingsPanel_ = new SettingsPanel(devices_, props_, prefs_, stagePosUpdater_);
       stagePosUpdater_.oneTimeUpdate();  // needed for NavigationPanel
       helpPanel_ = new HelpPanel();
@@ -169,6 +177,10 @@ public class ASIdiSPIMFrame extends MMFrame
       tabbedPane_.addLTab(helpPanel_);        // tabIndex = 8
       final int helpTabIndex = tabbedPane_.getTabCount() - 1;
       
+      // add the testing panel explicitly by uncommenting following lines
+      // intended to only be done in short term for testing
+      // TestingPanel testingPanel = new TestingPanel();
+      // tabbedPane_.addLTab(testingPanel);
 
       // attach position updaters
       stagePosUpdater_.addPanel(setupPanelA_);
@@ -180,6 +192,25 @@ public class ASIdiSPIMFrame extends MMFrame
       MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) setupPanelB_);
       MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) setupPanelA_);
       MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) navigationPanel_);
+      MMStudio.getInstance().getSnapLiveManager().addLiveModeListener(new LiveModeListener() {
+         // make sure to "wake up" any piezos with autosleep enabled before we start imaging 
+         @Override
+         public void liveModeEnabled(boolean enabled) {
+            if (enabled) {
+               try {
+                  for (Devices.Keys piezoKey : Devices.PIEZOS) {
+                     if (devices_.isValidMMDevice(piezoKey)) {
+                        if (props_.getPropValueInteger(piezoKey, Properties.Keys.AUTO_SLEEP_DELAY) > 0) {
+                           gui_.getMMCore().setRelativePosition(devices_.getMMDevice(piezoKey), 0);
+                        }
+                     }
+                  }
+               } catch (Exception e) {
+                  MyDialogUtils.showError("Could not reset piezo's positions");
+               }
+            }
+         }
+      });
       
       // make sure gotDeSelected() and gotSelected() get called whenever we switch tabs
       tabbedPane_.addChangeListener(new ChangeListener() {
@@ -219,10 +250,10 @@ public class ASIdiSPIMFrame extends MMFrame
             "[" + this.getWidth() + "]",
             "[" + this.getHeight() + "]"));
       glassPane.add(statusSubPanel_, "dock south");
+      
    }
    
    /**
-    * This accessor function should really only be used by the ScriptInterface
     * Do not get into the internals of this plugin without relying on
     * ASIdiSPIM.api
     * @return 
@@ -256,6 +287,15 @@ public class ASIdiSPIMFrame extends MMFrame
       
       // this can not be reached unless someone adds more sides than A and B
       return null;
+   }
+   
+   /**
+    * Do not get into the internals of this plugin without relying on
+    * ASIdiSPIM.api
+    * @return the currently used instance of the AutofocusPanel;
+    */
+   public AutofocusPanel getAutofocusPanel() {
+      return autofocusPanel_;
    }
    
    // MMListener mandated member functions

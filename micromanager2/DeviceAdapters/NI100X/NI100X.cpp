@@ -31,8 +31,10 @@ const char* g_PropertyVolts = "Volts";
 const char* g_PropertyMinVolts = "MinVolts";
 const char* g_PropertyMaxVolts = "MaxVolts";
 const char* g_PropertyChannel = "IOChannel";
+const char* g_PropertyPort = "AutoDetectedOutputPort";
 const char* g_PropertyCanTrigger = "SupportsTriggering";
 const char* g_PropertyTriggeringEnabled = "Sequenceable";
+const char* g_PropertySampleRate = "TriggerSampleRate";
 const char* g_PropertySequenceLength = "TriggerSequenceLength";
 const char* g_PropertyTriggerInput = "TriggerInputLine";
 //used for disabling EOMs temporariliy for laser switching
@@ -40,6 +42,7 @@ const char* g_PropertyDisable = "Block voltage";
 
 const char* g_PropertyDemo = "Demo";
 
+const char* g_UseCustom = "Use Custom";
 const char* g_Yes = "Yes";
 const char* g_No = "No";
 
@@ -87,8 +90,10 @@ MODULE_API void DeleteDevice(MM::Device* pDevice)
 // DAQDevice functions
 ///////////////////////////////////////////////////////////////////////////////
 
-DAQDevice::DAQDevice(): task_(NULL), channel_("undef"), isTriggeringEnabled_(true),
-    supportsTriggering_(true), maxSequenceLength_(1000), amPreparedToTrigger_(false)
+DAQDevice::DAQDevice(): task_(NULL), channel_("undef"),
+    isTriggeringEnabled_(true), samplesPerSec_(100000),
+    supportsTriggering_(true), maxSequenceLength_(1000),
+    amPreparedToTrigger_(false)
 {
 }
 
@@ -248,12 +253,26 @@ int DAQDevice::OnSequenceLength(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
+int DAQDevice::OnSampleRate(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+    if (eAct == MM::BeforeGet)
+    {
+        pProp->Set(boost::lexical_cast<std::string>(samplesPerSec_).c_str());
+    }
+    else if (eAct == MM::AfterSet)
+    {
+        pProp->Get(samplesPerSec_);
+    }
+
+    return DEVICE_OK;
+}
+
 int DAQDevice::SetupClockInput(int numVals)
 {
    // Samples per sec is the "maximum expected rate of the clock",
    // where clock is the input trigger signal
    int error = DAQmxCfgSampClkTiming(task_, inputTrigger_.c_str(),
-      SAMPLES_PER_SEC,
+      samplesPerSec_,
       DAQmx_Val_Rising, DAQmx_Val_ContSamps, numVals);
    if (error)
    {
@@ -287,8 +306,11 @@ int DAQDevice::SetupTask()
     }
    CancelTask();
    task_ = 0;
-   int niRet = DAQmxCreateTask(
-       boost::replace_all_copy(channel_, "/", "_").c_str(), &task_);
+   // Replace invalid (according to DAQmx) characters in our channel with
+   // underscores.
+   std::string tmp = boost::replace_all_copy(channel_, "/", "_");
+   tmp = boost::replace_all_copy(tmp, ":", "_");
+   int niRet = DAQmxCreateTask(tmp.c_str(), &task_);
    if (niRet)
    {
        return LogError(niRet, "CreateTask");
@@ -369,24 +391,29 @@ DigitalIO::DigitalIO() : numPos_(16), busy_(false), open_(false), state_(0)
    SetErrorText(ERR_WRITE_FAILED, "Failed to write data to the device");
    SetErrorText(ERR_CLOSE_FAILED, "Failed closing the device");
 
-   // Output channel (a.k.a. port)
+   // Output channel, which may be one or more lines or an entire port.
    CPropertyAction* pAct = new CPropertyAction (this, &DigitalIO::OnChannel);
    int nRet = CreateStringProperty(g_PropertyChannel, "devname", false, pAct, true);
    assert(DEVICE_OK == nRet);
+
+   // Output port -- a more convenient version of the above for users that
+   // don't need to specify individual lines.
+   pAct = new CPropertyAction(this, &DigitalIO::OnPort);
+   nRet = CreateStringProperty(g_PropertyPort, "devname", false, pAct, true);
    std::vector<std::string> devices = GetDevices();
    if (devices.size() == 0)
    {
-      AddAllowedValue(g_PropertyChannel, "No valid devices found");
+      AddAllowedValue(g_PropertyPort, "No valid devices found");
+   }
+   else
+   {
+      AddAllowedValue(g_PropertyPort, g_UseCustom);
+      SetProperty(g_PropertyPort, g_UseCustom);
    }
    for (std::vector<string>::iterator i = devices.begin(); i != devices.end(); ++i) {
       std::vector<string> ports = GetDigitalPortsForDevice(*i);
       for (std::vector<string>::iterator j = ports.begin(); j != ports.end(); ++j) {
-         AddAllowedValue(g_PropertyChannel, (*j).c_str());
-         if (GetNumberOfPropertyValues(g_PropertyChannel) == 1)
-         {
-            // First valid channel, so set it as the default value.
-            SetProperty(g_PropertyChannel, (*j).c_str());
-         }
+         AddAllowedValue(g_PropertyPort, (*j).c_str());
       }
    }
 
@@ -438,11 +465,20 @@ int DigitalIO::Initialize()
       return nRet;
    }
 
-   // TODO: this and the following property are copy/pasted in the DigitalIO
-   // and AnalogIO classes.
+   // TODO: this and the following two properties are copy/pasted in the
+   // DigitalIO and AnalogIO classes.
    // Manual triggering override.
    CPropertyAction* pAct = new CPropertyAction(this, &DAQDevice::OnTriggeringEnabled);
    nRet = CreateIntegerProperty(g_PropertyTriggeringEnabled, 1, false, pAct, false);
+   if (DEVICE_OK != nRet)
+   {
+      return nRet;
+   }
+
+   // Input trigger sample rate.
+   pAct = new CPropertyAction(this, &DAQDevice::OnSampleRate);
+   nRet = CreateIntegerProperty(g_PropertySampleRate, samplesPerSec_, false,
+         pAct, false);
    if (DEVICE_OK != nRet)
    {
       return nRet;
@@ -457,7 +493,7 @@ int DigitalIO::Initialize()
       return nRet;
    }
    char terminalsBuf[2048];
-    int error = DAQmxGetDevTerminals(deviceName_.c_str(), terminalsBuf, 2048);
+   int error = DAQmxGetDevTerminals(deviceName_.c_str(), terminalsBuf, 2048);
    if (error)
    {
       return LogError(error, "GetDevTerminals");
@@ -733,6 +769,24 @@ int DigitalIO::OnChannel(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
+int DigitalIO::OnPort(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::BeforeGet)
+   {
+      pProp->Set(port_.c_str());
+   }
+   else if (eAct == MM::AfterSet)
+   {
+      pProp->Get(port_);
+      if (strcmp(port_.c_str(), g_UseCustom) != 0)
+      {
+         // User wants to use one of our auto-detected ports.
+         channel_ = port_;
+      }
+   }
+
+   return DEVICE_OK;
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -756,20 +810,25 @@ AnalogIO::AnalogIO() :
    CPropertyAction* pAct = new CPropertyAction (this, &AnalogIO::OnChannel);
    int nRet = CreateStringProperty(g_PropertyChannel, "devname", false, pAct, true);
    assert(nRet == DEVICE_OK);
+
+   // Output port -- a more convenient version of the above for users that
+   // don't need to specify individual lines.
+   pAct = new CPropertyAction(this, &AnalogIO::OnPort);
+   nRet = CreateStringProperty(g_PropertyPort, "devname", false, pAct, true);
    std::vector<std::string> devices = GetDevices();
    if (devices.size() == 0)
    {
-      AddAllowedValue(g_PropertyChannel, "No valid devices found");
+      AddAllowedValue(g_PropertyPort, "No valid devices found");
+   }
+   else
+   {
+      AddAllowedValue(g_PropertyPort, g_UseCustom);
+      SetProperty(g_PropertyPort, g_UseCustom);
    }
    for (std::vector<string>::iterator i = devices.begin(); i != devices.end(); ++i) {
       std::vector<string> ports = GetAnalogPortsForDevice(*i);
       for (std::vector<string>::iterator j = ports.begin(); j != ports.end(); ++j) {
-         AddAllowedValue(g_PropertyChannel, (*j).c_str());
-         if (GetNumberOfPropertyValues(g_PropertyChannel) == 1)
-         {
-            // First valid channel, so set it as the default value.
-            SetProperty(g_PropertyChannel, (*j).c_str());
-         }
+         AddAllowedValue(g_PropertyPort, (*j).c_str());
       }
    }
 
@@ -833,6 +892,15 @@ int AnalogIO::Initialize()
    // Manual triggering override.
    CPropertyAction* pAct = new CPropertyAction(this, &DAQDevice::OnTriggeringEnabled);
    nRet = CreateIntegerProperty(g_PropertyTriggeringEnabled, 1, false, pAct, false);
+   if (DEVICE_OK != nRet)
+   {
+      return nRet;
+   }
+
+   // Input trigger sample rate.
+   pAct = new CPropertyAction(this, &DAQDevice::OnSampleRate);
+   nRet = CreateIntegerProperty(g_PropertySampleRate, samplesPerSec_, false,
+         pAct, false);
    if (DEVICE_OK != nRet)
    {
       return nRet;
@@ -1245,6 +1313,25 @@ int AnalogIO::OnChannel(MM::PropertyBase* pProp, MM::ActionType eAct)
    else if (eAct == MM::AfterSet)
    {
       pProp->Get(channel_);
+   }
+
+   return DEVICE_OK;
+}
+
+int AnalogIO::OnPort(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::BeforeGet)
+   {
+      pProp->Set(port_.c_str());
+   }
+   else if (eAct == MM::AfterSet)
+   {
+      pProp->Get(port_);
+      if (strcmp(port_.c_str(), g_UseCustom) != 0)
+      {
+         // User wants to use one of our auto-detected ports.
+         channel_ = port_;
+      }
    }
 
    return DEVICE_OK;

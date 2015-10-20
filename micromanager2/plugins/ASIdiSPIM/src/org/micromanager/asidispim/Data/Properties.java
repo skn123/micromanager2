@@ -67,6 +67,8 @@ public class Properties {
     * the value used by the device adapter.
     */
    public static enum Keys {
+      UPPER_LIMIT("UpperLim(mm)"),
+      LOWER_LIMIT("LowerLim(mm)"),
       JOYSTICK_ENABLED("JoystickEnabled"),
       JOYSTICK_INPUT("JoystickInput"),
       JOYSTICK_INPUT_X("JoystickInputX"),
@@ -77,6 +79,7 @@ public class Properties {
       SPIM_DELAY_REPEATS("SPIMDelayBeforeRepeat(ms)"),
       SPIM_NUM_SCANSPERSLICE("SPIMNumScansPerSlice"),
       SPIM_INTERLEAVE_SIDES("SPIMInterleaveSidesEnable"),
+      SPIM_PIEZO_HOME_ENABLE("SPIMPiezoHomeEnable"),
       SPIM_NUM_SLICES_PER_PIEZO("SPIMNumSlicesPerPiezo"),
       SPIM_LINESCAN_PERIOD("SingleAxisXPeriod(ms)"),
       SPIM_DELAY_SIDE("SPIMDelayBeforeSide(ms)"),
@@ -111,8 +114,8 @@ public class Properties {
       SAVE_CARD_SETTINGS("SaveCardSettings"),
       INPUT_MODE("InputMode"),
       PIEZO_MODE("PiezoMode"),
-      MOVE_TO_HOME("MoveToHome"),
       SET_HOME_HERE("SetHomeToCurrentPosition"),
+      AUTO_SLEEP_DELAY("AutoSleepDelay(min)"),
       PLOGIC_MODE("PLogicMode"),
       PLOGIC_PRESET("SetCardPreset"),
       PLOGIC_TRIGGER_SOURCE("TriggerSource"),
@@ -184,6 +187,8 @@ public class Properties {
       PLUGIN_DESIRED_SLICE_PERIOD("DesiredSlicePeriod"),
       PREFS_MINIMIZE_SLICE_PERIOD("MinimizeSlicePeriod"),
       PLUGIN_ACQUSITION_MODE("AcquisitionMode"),
+      AUTOFOCUS_ACQUSITION_MODE("AutofocusAcquisitionMode"),
+      AUTOFOCUS_SCORING_ALGORITHM("AutofocusScoringAlgorithm"),
       PLUGIN_ACQUSITION_USE_AUTOFOCUS("UseAutofocusInAcquisition"),
       PLUGIN_CAMERA_MODE("CameraMode"),
       PREFS_ENABLE_POSITION_UPDATES("EnablePositionUpdates"),
@@ -205,13 +210,12 @@ public class Properties {
       PLUGIN_AUTOFOCUS_WINDOW_HEIGHT("AutofocusWIndowHeight"),
       PLUGIN_AUTOFOCUS_ACQBEFORESTART("AutofocusDoBeforeACQStart"),
       PLUGIN_AUTOFOCUS_EACHNIMAGES("AutofocusEachNTimePoints"),
+      PLUGIN_AUTOFOCUS_MAXOFFSETCHANGE("AutofocusMaxOffsetChange"),
+      PLUGIN_AUTOFOCUS_MAXOFFSETCHANGE_SETUP("AutofocusMaxOffsetChangeSetup"),
+      PLUGIN_AUTOFOCUS_AUTOUPDATE_OFFSET("AutofocusAutoUpdateOffset"),
       PLUGIN_AUTOFOCUS_CHANNEL("AutofocusChannel"),
-<<<<<<< HEAD
       PLUGIN_AUTOFOCUS_MINIMUMR2("AutofocusMinimumR2"),
       PLUGIN_ADVANCED_CAMERA_EXPOSURE("AdvancedCameraExposure")
-=======
-      PLUGIN_AUTOFOCUS_MINIMUMR2("AutofocusMinimumR2")
->>>>>>> 2a699f366bb0e64e8db1360252280c77c63803f4
       ;
       private final String text;
       private final boolean hasPattern;  // true if string has substitution pattern
