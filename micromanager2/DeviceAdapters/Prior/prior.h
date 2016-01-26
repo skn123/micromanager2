@@ -18,7 +18,7 @@
 //
 // AUTHOR:        Nenad Amodaj, nenad@amodaj.com, 06/01/2006
 //
-// CVS:           $Id: prior.h 13358 2014-05-09 02:48:15Z mark $
+// CVS:           $Id: prior.h 15714 2015-08-18 22:28:37Z mark $
 //
 
 #ifndef _PRIOR_H_
@@ -110,6 +110,7 @@ private:
    std::string name_;
    std::string port_;
    unsigned curPos_;
+   bool open_;
    bool busy_;
    MM::MMTime changedTime_;
 

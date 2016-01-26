@@ -170,6 +170,12 @@ public class MultipageTiffWriter {
    private int currentImageByteBufferCapacity_ = 0;
            
    private ByteBuffer allocateByteBufferMemo(int capacity) {
+       // HACK: if we are running on 32-bit mode, then we don't want to cache
+       // our direct buffers, due to increased memory constraints on 32-bit
+       // systems.
+       if (System.getProperty("sun.arch.data.model").equals("32")) {
+           return allocateByteBuffer(capacity);
+       }
        if (capacity != currentImageByteBufferCapacity_) {
            currentImageByteBuffers_.clear();
            currentImageByteBufferCapacity_ = capacity;
@@ -303,9 +309,9 @@ public class MultipageTiffWriter {
    }
 
    /**
-    * Called when entire set of files (i.e. acquisition) is finished. Adds in all the extra
-    * (but nonessential) stuff--comments, display settings, OME/IJ metadata, and truncates the
-    * file to a reasonable length
+    * Called when entire set of files (i.e. acquisition) is finished. Adds in
+    * all the extra (but nonessential) stuff--comments, display settings,
+    * OME/IJ metadata, and truncates the file to a reasonable length
     */
    public void close(String omeXML) throws IOException {
       String summaryComment = "";
@@ -322,7 +328,7 @@ public class MultipageTiffWriter {
 
       if (omeTiff_) {
          try {
-            writeImageDescription(omeXML, omeDescriptionTagPosition_);                 
+            writeImageDescription(omeXML, omeDescriptionTagPosition_);
          } catch (Exception ex) {
             ReportingUtils.showError("Error writing OME metadata");
          }
@@ -353,7 +359,7 @@ public class MultipageTiffWriter {
       //5 MB extra padding..just to be safe
       int extraPadding = 5000000; 
       long size = length + SPACE_FOR_COMMENTS + numChannels_ * DISPLAY_SETTINGS_BYTES_PER_CHANNEL + extraPadding + filePosition_;
-      if ( size >= MAX_FILE_SIZE) {
+      if (size >= MAX_FILE_SIZE) {
          return false;
       }
       return true;
@@ -484,6 +490,7 @@ public class MultipageTiffWriter {
          img.tags.remove("Summary");
       }
       byte[] mdBytes = getBytesFromString(img.tags.toString() + " ");
+      mdBytes[mdBytes.length - 1] = 0; // null terminate TIFF ASCII string
 
       //2 bytes for number of directory entries, 12 bytes per directory entry, 4 byte offset of next IFD
      //6 bytes for bits per sample if RGB, 16 bytes for x and y resolution, 1 byte per character of MD string
@@ -853,17 +860,19 @@ public class MultipageTiffWriter {
       return new String(sb);
    }
 
-   private void writeImageDescription(String value, long imageDescriptionTagOffset) throws IOException {
+   private void writeImageDescription(String text, long imageDescriptionTagOffset) throws IOException {
+      byte[] bytes = getBytesFromString(text + " ");
+      bytes[bytes.length - 1] = 0; // null terminate TIFF ASCII string
+
       //write first image IFD
       ByteBuffer ifdCountAndValueBuffer = allocateByteBuffer(8);
-      ifdCountAndValueBuffer.putInt(0, value.length());
+      ifdCountAndValueBuffer.putInt(0, bytes.length);
       ifdCountAndValueBuffer.putInt(4, (int) filePosition_);
       fileChannelWrite(ifdCountAndValueBuffer, imageDescriptionTagOffset + 4);
 
       //write String
-      ByteBuffer buffer = ByteBuffer.wrap(getBytesFromString(value));
-      fileChannelWrite(buffer, filePosition_);
-      filePosition_ += buffer.capacity();
+      fileChannelWrite(ByteBuffer.wrap(bytes), filePosition_);
+      filePosition_ += bytes.length;
    }
 
    private byte[] getBytesFromString(String s) {

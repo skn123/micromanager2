@@ -19,6 +19,8 @@
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 
+//Modified by Thomas Peterbauer to accomodate 6- and 12-well plates
+
 package org.micromanager.hcs;
 
 import java.io.BufferedReader;
@@ -63,12 +65,15 @@ public class SBSPlate {
    private static final String FIRST_WELL_X = "first_well_x";
    private static final String FIRST_WELL_Y = "first_well_y";
 
+   public static final String SBS_6_WELL= "6WELL";
+   public static final String SBS_12_WELL= "12WELL";
    public static final String SBS_24_WELL= "24WELL";
    public static final String SBS_48_WELL= "48WELL";
    public static final String SBS_96_WELL= "96WELL";
    public static final String SBS_384_WELL= "384WELL";
    public static final String SLIDE_HOLDER ="SLIDES";
-   public static final String DEFAULT_XYSTAGE_NAME = "XYStage"; 
+   public static final String IBIDI_24_WELL = "Ibidi-24WELL";
+   public static final String DEFAULT_XYSTAGE_NAME = "XYStage";
    public static final String CUSTOM = "CUSTOM";
    private static final String METADATA_SITE_PREFIX = "Site";
 
@@ -84,7 +89,7 @@ public class SBSPlate {
       wellMap_ = new HashMap<String, Well>();
       initialize(SBS_96_WELL);
    }
-   
+
    @Override
    public String toString() {
       return id_;
@@ -107,7 +112,34 @@ public class SBSPlate {
          wellSizeY_ = 14000.0;
          circular_ = true;
 */
-      if (id.equals(SBS_24_WELL)){
+      //Dimensions: Corning plates
+      if (id.equals(SBS_6_WELL)){
+         id_ = SBS_6_WELL;
+         numColumns_ = 3;
+         numRows_ = 2;
+         sizeXUm_ = 127760.0;
+         sizeYUm_ = 85470.0;
+         wellSpacingX_ = 39120.0;
+         wellSpacingY_ = 39120.0;
+         firstWellX_ = 24760.0;
+         firstWellY_ = 23160.0;
+         wellSizeX_ = 34800.0;
+         wellSizeY_ = 34800.0;
+         circular_ = true;
+      } else if (id.equals(SBS_12_WELL)) {
+          id_ = SBS_12_WELL;
+          numColumns_ = 4;
+          numRows_ = 3;
+          sizeXUm_ = 127890.0;
+          sizeYUm_ = 85600.0;
+          wellSpacingX_ = 26010.0;
+          wellSpacingY_ = 26010.0;
+          firstWellX_ = 24940.0;
+          firstWellY_ = 16790.0;
+          wellSizeX_ = 22110.0;
+          wellSizeY_ = 22110.0;
+          circular_ = true;
+      } else if (id.equals(SBS_24_WELL)){
          id_ = SBS_24_WELL;
          numColumns_ = 6;
          numRows_ = 4;
@@ -116,7 +148,7 @@ public class SBSPlate {
          wellSpacingX_ = 19300.0;
          wellSpacingY_ = 19300.0;
          firstWellX_ = 17050.0;
-         firstWellY_ = 13670.0;        
+         firstWellY_ = 13670.0;
          wellSizeX_ = 15540.0;
          wellSizeY_ = 15540.0;
          circular_ = true;
@@ -129,7 +161,7 @@ public class SBSPlate {
          wellSpacingX_ = 13000.0;
          wellSpacingY_ = 13000.0;
          firstWellX_ = 18380.0;
-         firstWellY_ = 10240.0;        
+         firstWellY_ = 10240.0;
          wellSizeX_ = 11370.0;
          wellSizeY_ = 11370.0;
          circular_ = true;
@@ -155,7 +187,7 @@ public class SBSPlate {
          wellSpacingX_ = 4500.0;
          wellSpacingY_ = 4500.0;
          firstWellX_ = 12130.0;
-         firstWellY_ = 8990.0;        
+         firstWellY_ = 8990.0;
          wellSizeX_ = 4000.0;
          wellSizeY_ = 4000.0;
          circular_ = false;
@@ -168,10 +200,23 @@ public class SBSPlate {
          wellSpacingX_ = 27600.0;
          wellSpacingY_ = 80000.0;
          firstWellX_ = 20000.0;
-         firstWellY_ = 50000.0;        
+         firstWellY_ = 50000.0;
          wellSizeX_ = 25600.0;
          wellSizeY_ = 75000.0;
          circular_ = false;
+      } else if (id.equals(IBIDI_24_WELL)) {
+         id_ = IBIDI_24_WELL;
+         numColumns_ = 6;
+         numRows_ = 4;
+         sizeXUm_ = 127700.0;
+         sizeYUm_ = 85500.0;
+         wellSpacingX_ = 19000.0;
+         wellSpacingY_ = 19000.0;
+         firstWellX_ = 16350.0;
+         firstWellY_ = 14250.0;
+         wellSizeX_ = 15500.0;
+         wellSizeY_ = 15500.0;
+         circular_ = true;
       }
 
       try {
@@ -185,7 +230,7 @@ public class SBSPlate {
    public void load(String path) throws HCSException {
       StringBuilder contents = new StringBuilder();
       try {
-         // read metadata from file            
+         // read metadata from file
          BufferedReader input = new BufferedReader(new FileReader(path));
          String line;
          while (( line = input.readLine()) != null){
@@ -200,14 +245,14 @@ public class SBSPlate {
 
    }
 
-   public void save(String path) throws HCSException {     
+   public void save(String path) throws HCSException {
       try {
          FileWriter fw = new FileWriter(path);
          fw.write(serialize());
          fw.close();
       } catch (IOException e) {
          throw new HCSException("Unable to create plate definition file: " + e.getMessage());
-      }      
+      }
    }
 
    public String serialize() throws HCSException {
@@ -253,6 +298,8 @@ public class SBSPlate {
     * Generate a list of well positions using 'snake' pattern.
     * Takes a list of sites and merges them into the well list.
     * Site XY coordinates are assumed to be relative to the well center.
+    * @param xyStageName name of the XY stage used to generate these sites
+    * @param sites 
     * @return - an array of well positions
     */
    public WellPositionList[] generatePositions(String xyStageName, PositionList sites) {
@@ -305,7 +352,7 @@ public class SBSPlate {
    }
 
    public WellPositionList[] generatePositions(String xyStageName) {
-      
+
       // generate default site in the center of the well
       PositionList sites = new PositionList();
       MultiStagePosition mps = new MultiStagePosition();
@@ -315,10 +362,10 @@ public class SBSPlate {
       sp.y = 0.0;
       mps.add(sp);
       sites.addPosition(mps);
-      
+
       return generatePositions(xyStageName, sites);
    }
-   
+
    public String getID() {
       return id_;
    }
@@ -507,21 +554,18 @@ public class SBSPlate {
       int row = getWellRow(y);
       return getWellLabel(row+1, col+1);
    }
-   
+
    int getWellRow(double y) {
       return (int)((y - getTopLeftY())/wellSpacingY_);
    }
-   
+
    int getWellColumn(double x) {
       return (int)((x - getTopLeftX())/wellSpacingX_);
    }
-   
+
    boolean isPointWithin(double x, double y) {
-      if (x >= 0.0 && x < sizeXUm_ && y >= 0.0 && y < sizeYUm_)
-         return true;
-      else
-         return false;
-            
+      return x >= 0.0 && x < sizeXUm_ && y >= 0.0 && y < sizeYUm_;
+
    }
 
 }

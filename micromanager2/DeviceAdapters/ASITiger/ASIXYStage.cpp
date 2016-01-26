@@ -54,8 +54,7 @@ CXYStage::CXYStage(const char* name) :
    axisLetterX_(g_EmptyAxisLetterStr),    // value determined by extended name
    axisLetterY_(g_EmptyAxisLetterStr),    // value determined by extended name
    advancedPropsEnabled_(false),
-   speedTruth_(false),
-   refreshOverride_(false)
+   speedTruth_(false)
 {
    if (IsExtendedName(name))  // only set up these properties if we have the required information in the name
    {
@@ -480,6 +479,8 @@ bool CXYStage::Busy()
          return true;
       command.str("");
       command << "RS " << axisLetterY_ << "?";
+      if (hub_->QueryCommandVerify(command.str(),":A") != DEVICE_OK)  // say we aren't busy if we can't communicate
+         return false;
       if (hub_->GetAnswerCharAtPosition3(c) != DEVICE_OK)
          return false;
       return (c == 'B');

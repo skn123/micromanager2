@@ -50,14 +50,13 @@ import org.micromanager.utils.FileDialogs;
 public class DataAnalysisPanel extends ListeningJPanel {
    private final Prefs prefs_;
    private final JPanel exportPanel_;
-   private final JPanel imageJPanel_;
    private final JTextField saveDestinationField_;
    private final JTextField baseNameField_;
    
    public static final String[] TRANSFORMOPTIONS = 
       {"None", "Rotate Right 90\u00B0", "Rotate Left 90\u00B0", "Rotate outward"};
    public static final String[] EXPORTFORMATS = 
-      {"mipav GenerateFusion", "Multiview Reconstruction"};
+      {"mipav GenerateFusion", "Multiview Reconstruction (deprecated)"};
    public static FileDialogs.FileType EXPORT_DATA_SET 
            = new FileDialogs.FileType("EXPORT_DATA_SET",
                  "Export to Location",
@@ -209,49 +208,7 @@ public class DataAnalysisPanel extends ListeningJPanel {
       
       // end export sub-panel
       
-      // start ImageJ sub-panel
-      imageJPanel_ = new JPanel(new MigLayout(
-              "",
-              "[center]",
-              "[]8[]"));
-      
-      imageJPanel_.setBorder(PanelUtils.makeTitledBorder("ImageJ"));
-      
-      JButton adjustBC = new JButton("Brightness/Contrast");
-      adjustBC.addActionListener(new ActionListener() {
-         @Override
-         public void actionPerformed(ActionEvent e) {
-            IJCommandThread t = new IJCommandThread("Brightness/Contrast...");
-            t.start();
-         }
-      });
-      imageJPanel_.add(adjustBC, "wrap");
-      
-      JButton splitChannels = new JButton("Split Channels");
-      splitChannels.addActionListener(new ActionListener() {
-         @Override
-         public void actionPerformed(ActionEvent e) {
-            IJCommandThread t = new IJCommandThread("Split Channels");
-            t.start();
-         }
-      });
-      imageJPanel_.add(splitChannels, "wrap");
-      
-      JButton zProjection = new JButton("Z Projection");
-      zProjection.addActionListener(new ActionListener() {
-         @Override
-         public void actionPerformed(ActionEvent e) {
-            IJCommandThread t = new IJCommandThread("Z Project...", "projection=[Max Intensity]");
-            t.start();
-         }
-      });
-      imageJPanel_.add(zProjection, "wrap");
-      
-      // end ImageJ sub-panel
-            
-       
       this.add(exportPanel_);
-      this.add(imageJPanel_);
    }
    
    @Override
@@ -299,52 +256,66 @@ public class DataAnalysisPanel extends ListeningJPanel {
 
          if (exportFormat_ == 0) { // mipav
             
-            ImageProcessor iProc = ip.getProcessor();
-            if (!mmW.getSummaryMetaData().getString("NumberOfSides").equals("2")) {
-               throw new SaveTaskException("mipav export only works with two-sided data for now.");  
-            }
+            boolean multiPosition = false;
             if (mmW.getNumberOfPositions() > 1) {
-               throw new SaveTaskException("mipav export does not yet work with multiple positions");  
+               multiPosition = true;
             }
             
-            boolean usesChannels = mmW.getNumberOfChannels() > 2;  // if have channels besides two cameras
-            String [] channelDirArray = new String[mmW.getNumberOfChannels()];
-            if (usesChannels) {
-               for (int c = 0; c < mmW.getNumberOfChannels(); c++) {
-                  String chName = (String)mmW.getSummaryMetaData().getJSONArray("ChNames").get(c);
-                  String colorName = chName.substring(chName.indexOf("-")+1);  // matches with AcquisitionPanel naming convention
-                  channelDirArray[c] = targetDirectory_ + File.separator + baseName_ + File.separator
-                        + (((c % 2) == 0) ? "SPIMA" : "SPIMB") + File.separator + colorName;
+            for (int position = 0; position < mmW.getNumberOfPositions(); position++) {
+               
+               ImageProcessor iProc = ip.getProcessor();
+               int nrSides = 0;
+               if (mmW.getSummaryMetaData().getString("NumberOfSides").equals("2")) {
+                  nrSides = 2;
+               } else if (mmW.getSummaryMetaData().getString("NumberOfSides").equals("1")) {
+                  nrSides = 1;
+               } else {
+                  throw new SaveTaskException("unsupported number of sides");
                }
-            } else {
-               channelDirArray[0] = targetDirectory_ + File.separator + baseName_ + 
-                     File.separator + "SPIMA";
-               channelDirArray[1] = targetDirectory_ + File.separator + baseName_ + 
-                     File.separator + "SPIMB";
-            }
 
-            for (String dir : channelDirArray) {
-               if (new File(dir).exists()) {
+               boolean usesChannels = (mmW.getNumberOfChannels()/nrSides) > 1;  // if have channels besides two cameras
+               String [] channelDirArray = new String[mmW.getNumberOfChannels()];
+               if (usesChannels) {
+                  for (int c = 0; c < mmW.getNumberOfChannels(); c++) {
+                     String chName = (String)mmW.getSummaryMetaData().getJSONArray("ChNames").get(c);
+                     String colorName = chName.substring(chName.indexOf("-")+1);  // matches with AcquisitionPanel naming convention
+                     channelDirArray[c] = targetDirectory_ + File.separator + baseName_ + File.separator
+                           + (multiPosition ? ("Pos" + position + File.separator) : "")
+                           + (((c % nrSides) == 0) ? "SPIMA" : "SPIMB") + File.separator + colorName;
+                  }
+               } else {  // two channels are from two views, no need for separate folders for each channel
+                  channelDirArray[0] = targetDirectory_ + File.separator + baseName_ + File.separator
+                        + (multiPosition ? ("Pos" + position + File.separator) : "")
+                        + "SPIMA";
+                  if (nrSides > 1) {
+                     channelDirArray[1] = targetDirectory_ + File.separator + baseName_ + File.separator
+                           + (multiPosition ? ("Pos" + position + File.separator) : "")
+                           + "SPIMB";
+                  }
+               }
+
+               for (String dir : channelDirArray) {
+                  if (new File(dir).exists()) {
                      throw new SaveTaskException("Output directory already exists");
+                  }
                }
-            }
 
-            for (String dir : channelDirArray) {
-               new File(dir).mkdirs();
-            }
+               for (String dir : channelDirArray) {
+                  new File(dir).mkdirs();
+               }
 
-            int totalNr = mmW.getNumberOfChannels() * mmW.getNumberOfFrames() * mmW.getNumberOfSlices();
-            int counter = 0;
-            
-            for (int c = 0; c < mmW.getNumberOfChannels(); c++) {  // for each channel
-               for (int t = 0; t < mmW.getNumberOfFrames(); t++) {  // for each timepoint
-                  ImageStack stack = new ImageStack(iProc.getWidth(), iProc.getHeight());
-                  for (int i = 0; i < mmW.getNumberOfSlices(); i++) {
-                     ImageProcessor iProc2;
-                     iProc2 = mmW.getImageProcessor(c, i, t, 1);
+               int totalNr = mmW.getNumberOfChannels() * mmW.getNumberOfFrames() * mmW.getNumberOfSlices();
+               int counter = 0;
 
-                     // optional transformation
-                     switch (transformIndex_) {
+               for (int c = 0; c < mmW.getNumberOfChannels(); c++) {  // for each channel
+                  for (int t = 0; t < mmW.getNumberOfFrames(); t++) {  // for each timepoint
+                     ImageStack stack = new ImageStack(iProc.getWidth(), iProc.getHeight());
+                     for (int i = 0; i < mmW.getNumberOfSlices(); i++) {
+                        ImageProcessor iProc2;
+                        iProc2 = mmW.getImageProcessor(c, i, t, 1);
+
+                        // optional transformation
+                        switch (transformIndex_) {
                         case 1: {
                            iProc2.rotate(90);
                            break;
@@ -357,18 +328,19 @@ public class DataAnalysisPanel extends ListeningJPanel {
                            iProc2.rotate(((c % 2) == 1) ? 90 : -90);
                            break;
                         }
-                     }
+                        }
 
-                     stack.addSlice(iProc2);
-                     counter++;
-                     double rate = ((double) counter / (double) totalNr) * 100.0;
-                     setProgress((int) Math.round(rate));
+                        stack.addSlice(iProc2);
+                        counter++;
+                        double rate = ((double) counter / (double) totalNr) * 100.0;
+                        setProgress((int) Math.round(rate));
+                     }
+                     ImagePlus ipN = new ImagePlus("tmp", stack);
+                     ipN.setCalibration(ip.getCalibration());
+                     ij.IJ.save(ipN, channelDirArray[c] + File.separator 
+                           + (((c % nrSides) == 0) ? "SPIMA" : "SPIMB")
+                           + "-" + t + ".tif");
                   }
-                  ImagePlus ipN = new ImagePlus("tmp", stack);
-                  ipN.setCalibration(ip.getCalibration());
-                  ij.IJ.save(ipN, channelDirArray[c] + File.separator 
-                        + (((c % 2) == 0) ? "SPIMA" : "SPIMB")
-                        + "-" + t + ".tif");
                }
             }
             
@@ -449,29 +421,4 @@ public class DataAnalysisPanel extends ListeningJPanel {
       }
    }
    
-   /**
-    * Make it easy to execute an ImageJ command in its own thread (for speed).
-    * After creating this object with the command (menu item) then call its start() method.
-    * TODO: see if this would be faster using ImageJ's Executer class (http://rsb.info.nih.gov/ij/developer/api/ij/Executer.html)
-    * @author Jon
-    */
-   class IJCommandThread extends Thread {
-      private final String command_;
-      private final String args_;
-      IJCommandThread(String command) {
-         super(command);
-         command_ = command;
-         args_ = "";
-      }
-      IJCommandThread(String command, String args) {
-         super(command);
-         command_ = command;
-         args_ = args;
-      }
-      @Override
-      public void run() {
-         IJ.run(command_, args_);
-      }
-   }
-  
 }

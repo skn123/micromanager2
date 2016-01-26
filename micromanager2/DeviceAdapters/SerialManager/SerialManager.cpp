@@ -521,8 +521,9 @@ int SerialPort::Initialize()
    }
    catch (std::exception& e)
    {
+      SetErrorText(ERR_OPEN_FAILED, e.what());
       LogMessage(e.what());
-      return DEVICE_ERR;
+      return ERR_OPEN_FAILED;
    }
 
    try
@@ -532,8 +533,9 @@ int SerialPort::Initialize()
    }
    catch(std::exception& what)
    {
+      SetErrorText(ERR_OPEN_FAILED, what.what());
       LogMessage(what.what(), false);
-      return DEVICE_ERR;
+      return ERR_OPEN_FAILED;
    }
 
    ret = UpdateStatus();
@@ -709,24 +711,10 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
    char theData = 0;
 
    MM::MMTime startTime = GetCurrentMMTime();
-   MM::MMTime retryWarnTime(0);
    MM::MMTime answerTimeout(answerTimeoutMs_ * 1000.0);
-   // warn of retries every 200 ms.
-   MM::MMTime retryWarnInterval(0, 200000);
-   int retryCounter = 0;
+   MM::MMTime nonTerminatedAnswerTimeout(5.0 * 1000.0); // For bug-compatibility
    while ((GetCurrentMMTime() - startTime)  < answerTimeout)
    {
-      MM::MMTime tNow = GetCurrentMMTime();
-      if ( retryWarnInterval < tNow - retryWarnTime)
-      {
-         retryWarnTime = tNow;
-         if( 1 < retryCounter)
-         {
-            LogMessage((std::string("GetAnswer # retries = ") + 
-                boost::lexical_cast<std::string,int>(retryCounter)).c_str(), true);
-         }
-        retryCounter++;
-      }
       bool anyRead =  pPort_->ReadOneCharacter(theData);        
       if( anyRead )
       {
@@ -742,7 +730,6 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
       {
          //Yield to other threads:
          CDeviceUtils::SleepMs(1);
-         ++retryCounter;
       }
 
       // look for the terminator, if any
@@ -750,14 +737,8 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
       {
          // check for terminating sequence
          char* termPos = strstr(answer, term);
-         if (termPos != 0)
+         if (termPos != 0) // found the terminator
          {
-            // found the terminator!!
-
-            if( 2 < retryCounter )
-               LogMessage(("GetAnswer # retries = " +
-                  boost::lexical_cast<std::string>(retryCounter)).c_str(), true);
-
             LogAsciiCommunication("GetAnswer", true, answer);
 
             // erase the terminator from the answer:
@@ -769,17 +750,23 @@ int SerialPort::GetAnswer(char* answer, unsigned bufLen, const char* term)
       else
       {
          // XXX Shouldn't it be an error to not have a terminator?
-         if( 4 < retryCounter)
+         // TODO Make it a precondition check (immediate error) once we've made
+         // sure that no device adapter calls us without a terminator. For now,
+         // keep the behavior for the sake of bug-compatibility.
+
+         MM::MMTime elapsed = GetCurrentMMTime() - startTime;
+         if (elapsed > nonTerminatedAnswerTimeout)
          {
-            LogMessage(("GetAnswer without terminator returned after " + 
-               boost::lexical_cast<std::string>((long)((GetCurrentMMTime() - startTime).getMsec())) +
-               "msec").c_str(), true);
             LogAsciiCommunication("GetAnswer", true, answer);
+            long millisecs = static_cast<long>(elapsed.getMsec());
+            LogMessage(("GetAnswer without terminator returning after " +
+                     boost::lexical_cast<std::string>(millisecs) +
+                     "msec").c_str(), true);
             return DEVICE_OK;
          }
       }
+   }
 
-   } // end while
    LogMessage("TERM_TIMEOUT error occured!");
    return ERR_TERM_TIMEOUT;
 }
@@ -817,7 +804,6 @@ int SerialPort::Read(unsigned char* buf, unsigned long bufLen, unsigned long& ch
    if (!initialized_)
       return ERR_PORT_NOTINITIALIZED;
 
-   unsigned long charsReadOld = 0;
    int r = DEVICE_OK;
    if( 0 < bufLen)
    {
@@ -833,27 +819,16 @@ int SerialPort::Read(unsigned char* buf, unsigned long bufLen, unsigned long& ch
          if( anyRead)
          {
             buf[charsRead] = (unsigned char)theData;
-
             if( bufLen <= ++charsRead)
             {
                // buffer is full
                break;
             }
-            // update charsReadOld
-            charsReadOld = charsRead;
          }
          else
          {
-           // now, check if there has been any change in charsRead?
-           if (charsReadOld > 0 && charsRead > 0 && (charsReadOld == charsRead))
-           {
-             break;
-           }
-
             // no data was available
-            //break;
-            //Yield to other threads:
-            CDeviceUtils::SleepMs(1);
+            break;
          }
       }
       if( 0 < charsRead)

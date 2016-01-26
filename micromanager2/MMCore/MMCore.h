@@ -84,13 +84,6 @@
 #   define MMCORE_DEPRECATED(prototype) prototype
 #endif
 
-#ifdef _MSC_VER
-  #ifdef MMCORE_EXPORTS
-  #define MMCORE_API __declspec(dllexport) 
-  #else
-  #define MMCORE_API __declspec(dllimport) 
-  #endif
-#endif
 
 class CPluginManager;
 class CircularBuffer;
@@ -131,7 +124,7 @@ typedef unsigned int* imgRGB32;
  * The signatures of most of the public member functions are designed to be
  * wrapped by SWIG with minimal manual configuration.
  */
-class MMCORE_API CMMCore
+class CMMCore
 {
    friend class CoreCallback;
    friend class CorePropertyCollection;

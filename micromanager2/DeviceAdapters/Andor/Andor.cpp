@@ -37,7 +37,7 @@
 //
 // FUTURE DEVELOPMENT: From September 1 2007, the development of this adaptor is taken over by Andor Technology plc. Daigang Wen (d.wen@andor.com) is the main contact. Changes made by him will not be labeled.
 // LINUX DEVELOPMENT: From February 1, 2009, Linux compatibility was done by Karl Bellve at the Biomedical Imaging Group at the University of Massachusetts (Karl.Bellve@umassmed.edu)
-// CVS:           $Id: Andor.cpp 14645 2014-11-19 17:52:56Z matthew $
+// CVS:           $Id: Andor.cpp 15796 2015-10-05 16:45:49Z christophe $
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -1261,7 +1261,7 @@ int AndorCamera::GetListOfAvailableCameras()
 		   }
 
       }
-
+      
       //DMA parameters
       //if(caps.ulSetFunctions & AC_SETFUNCTION_DMAPARAMETERS)
       { 
@@ -1271,7 +1271,7 @@ int AndorCamera::GetListOfAvailableCameras()
          if (DRV_SUCCESS != ret)
             return (int)ret;
       } 
-
+      
 
       pAct = new CPropertyAction (this, &AndorCamera::OnTimeOut);
       nRet = CreateProperty(g_TimeOut, CDeviceUtils::ConvertToString(imageTimeOut_ms_), MM::Integer, false, pAct);
@@ -1642,7 +1642,8 @@ int AndorCamera::GetListOfAvailableCameras()
 
          ActualInterval_ms_str_ += " (minimum)";
       }
-
+	  
+	  SetProperty(MM::g_Keyword_Exposure, CDeviceUtils::ConvertToString(fExposure));
       OnPropertyChanged(MM::g_Keyword_ReadoutTime, CDeviceUtils::ConvertToString(ReadoutTime_));
       OnPropertyChanged(g_Keyword_KeepCleanTime, CDeviceUtils::ConvertToString(KeepCleanTime_));
       OnPropertyChanged(MM::g_Keyword_ActualInterval_ms,ActualInterval_ms_str_.c_str());
@@ -3924,14 +3925,19 @@ int AndorCamera::GetListOfAvailableCameras()
       LogMessage(os.str().c_str());
 
       LogMessage("Setting DMA Parameters", true);
-      int imagesPerDma = 64;
-      if(imagesPerDma>numImages)
-         imagesPerDma=numImages;
+      
+      if (EXTERNAL != iCurrentTriggerMode_ && EXTERNALEXPOSURE != iCurrentTriggerMode_ && FASTEXTERNAL != iCurrentTriggerMode_) {
+        // optimise the DMA setting unless we are running in external trigger or external exposure
+        // in those modes, the SDK set up the DMA to 1 which prevents time outs in case of slow trigger
+        int imagesPerDma = 64;
+        if(imagesPerDma>numImages)
+           imagesPerDma=numImages;
 
-      // Limit number of images per DMA to sequence length in-case we're using external trig
-      int ret = SetDMAParameters(imagesPerDma, 0.001f);
-      if (DRV_SUCCESS != ret)
-         return (int)ret;
+        int ret = SetDMAParameters(imagesPerDma, 0.001f);
+      
+        if (DRV_SUCCESS != ret)
+           return (int)ret;
+      }
       
 
       LogMessage("Setting Trigger Mode", true);
@@ -3942,7 +3948,7 @@ int AndorCamera::GetListOfAvailableCameras()
 
 
       // prepare the camera
-      ret = SetAcquisitionMode(5); // run till abort
+      int ret = SetAcquisitionMode(5); // run till abort
       if (ret != DRV_SUCCESS)
          return ret;
       LogMessage("Set acquisition mode to 5", true);

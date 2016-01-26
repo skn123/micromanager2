@@ -106,7 +106,7 @@ using namespace std;
  * (Keep the 3 numbers on one line to make it easier to look at diffs when
  * merging/rebasing.)
  */
-const int MMCore_versionMajor = 8, MMCore_versionMinor = 1, MMCore_versionPatch = 0;
+const int MMCore_versionMajor = 8, MMCore_versionMinor = 1, MMCore_versionPatch = 1;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -3425,6 +3425,20 @@ void CMMCore::setXYStageDevice(const char* xyDeviceLabel) throw (CMMError)
  */
 void CMMCore::setCameraDevice(const char* cameraLabel) throw (CMMError)
 {
+   // If a sequence acquisition is running, the camera cannot be switched. (In
+   // order to start sequences for multiple cameras, one must instead use the
+   // version of startSequenceAcquisition() that takes the camera label.)
+
+   // Note: there is a blatant race condition between this and the
+   // starting/stopping of sequence acquisitions. This is hard to fix it at the
+   // moment, as we would need a way to safely lock two cameras at the same
+   // time.
+   if (isSequenceRunning())
+   {
+      throw CMMError("Cannot switch camera device while sequence acquisition "
+            "is running");
+   }
+
    if (cameraLabel && strlen(cameraLabel) > 0)
    {
       currentCameraDevice_ =
@@ -5280,7 +5294,7 @@ vector<char> CMMCore::readFromSerialPort(const char* portLabel) throw (CMMError)
    boost::shared_ptr<SerialInstance> pSerial =
       deviceManager_->GetDeviceOfType<SerialInstance>(portLabel);
 
-   const int bufLen = 256;//1024; // internal chunk size limit
+   const int bufLen = 1024; // internal chunk size limit
    unsigned char answerBuf[bufLen];
    unsigned long read;
    int ret = pSerial->Read(answerBuf, bufLen, read);

@@ -97,12 +97,53 @@ int ASIHub::ClearComPort(void)
    return PurgeComPort(port_.c_str());
 }
 
-int ASIHub::SendCommand(const char *command)
-// changed from early implementation; calls QueryCommand
+/**
+   * Sends a command and gets the serial buffer (doesn't try to verify end of transmission)
+   */
+int ASIHub::QueryCommandUnterminatedResponse(const char *command, const long timeoutMs)
 {
-   RETURN_ON_MM_ERROR ( QueryCommand(command, serialTerminator_) );
-   return DEVICE_OK;
+   RETURN_ON_MM_ERROR ( ClearComPort() );
+   RETURN_ON_MM_ERROR ( SendSerialCommand(port_.c_str(), command, "\r") );
+   serialCommand_ = command;
+   char rcvBuf[MM::MaxStrLength];
+   memset(rcvBuf, 0, MM::MaxStrLength);
+   unsigned long read = 0;
+   int ret = DEVICE_OK;
+   MM::TimeoutMs timerOut(GetCurrentMMTime(), timeoutMs);
+   serialAnswer_ = "";
+   while (ret == DEVICE_OK && read == 0 && !timerOut.expired(GetCurrentMMTime()))
+   {
+      ret = ReadFromComPort(port_.c_str(), (unsigned char*)rcvBuf, MM::MaxStrLength, read);
+   }
+   if (read > 0)
+   {
+      serialAnswer_ = rcvBuf;
+   }
+   return ret;
 }
+
+//something like this could be used to get the reply to INFO command where the reply is
+//   longer than 1024 characters.  Even this seems to have a problem with the end of the
+//   INFO reply because the serial buffer appears to only get the first 1023 characters
+//   of the controller's reply.
+// instead we simply enforce that we don't send the info command
+//int ASIHub::QueryCommandLongReply(const char *command)
+//{
+//   RETURN_ON_MM_ERROR ( ClearComPort() );
+//   RETURN_ON_MM_ERROR ( SendSerialCommand(port_.c_str(), command, "\r") );
+//   serialCommand_ = command;
+//   string lastLine = "";
+//   serialAnswer_ = "";
+//   int lastErr = DEVICE_OK;
+//   while (lastErr == DEVICE_OK)
+//   {
+//      lastLine = "";
+//      lastErr = GetSerialAnswer(port_.c_str(), "\r", lastLine);
+//      CDeviceUtils::SleepMs(1);
+//      serialAnswer_ += (lastLine + "\r");
+//   }
+//   return DEVICE_OK;
+//}
 
 int ASIHub::QueryCommand(const char *command, const char *replyTerminator, const long delayMs)
 {
@@ -491,6 +532,15 @@ int ASIHub::OnSerialTerminator(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
+// use the peculiar fact that the info command is the only Tiger command
+// that begins with the letter I.  So isolate for the actual command
+// (stripping card address and leading whitespace) and then see if the
+// first character is an "I" (not case sensitive)
+bool isINFOCommand(const string command)
+{
+   return toupper(command.at(command.find_first_not_of(" 0123456789"))) == 'I';
+}
+
 int ASIHub::OnSerialCommand(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    if (eAct == MM::BeforeGet)
@@ -505,8 +555,12 @@ int ASIHub::OnSerialCommand(MM::PropertyBase* pProp, MM::ActionType eAct)
       // only send the command if it has been updated, or if the feature has been set to "no"/false then always send
       if (!serialOnlySendChanged_ || (tmpstr.compare(last_command) != 0))
       {
+         // prevent executing the INFO command
+         if (isINFOCommand(tmpstr))
+            return ERR_INFO_COMMAND_NOT_SUPPORTED;
+
          last_command = tmpstr;
-         SendCommand(tmpstr);
+         QueryCommand(tmpstr);
          // TODO add some sort of check if command was successful, update manualSerialAnswer_ accordingly (e.g. leave blank for invalid command like aoeu)
          manualSerialAnswer_ = serialAnswer_;  // remember this reply even if SendCommand is called elsewhere
       }
@@ -546,7 +600,7 @@ int ASIHub::OnSerialCommandRepeatDuration(MM::PropertyBase* pProp, MM::ActionTyp
 
       // keep repeating for the requested duration
       while ( (GetCurrentMMTime() - startTime) < duration ) {
-         SendCommand(command);
+         QueryCommand(command);
          CDeviceUtils::SleepMs(serialRepeatPeriod_);
       }
 

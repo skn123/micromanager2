@@ -17,7 +17,7 @@
 //                IN NO EVENT SHALL THE COPYRIGHT OWNER OR
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
-// CVS:           $Id: Property.cpp 14603 2014-11-11 18:15:08Z mark $
+// CVS:           $Id: Property.cpp 15892 2016-01-06 23:03:12Z mark $
 
 #include "Property.h"
 
@@ -340,21 +340,20 @@ int MM::PropertyCollection::CreateProperty(const char* pszName, const char* pszV
 
    switch(eType)
    {
-   case MM::String:
-         pProp = new MM::StringProperty();
-      break;
-      
+      case MM::String:
+         pProp = new MM::StringProperty(pszName);
+         break;
+
       case MM::Integer:
-         pProp = new MM::IntegerProperty();
-      break;
+         pProp = new MM::IntegerProperty(pszName);
+         break;
 
       case MM::Float:
-         pProp = new MM::FloatProperty();
-      break;
+         pProp = new MM::FloatProperty(pszName);
+         break;
 
       default:
-         return DEVICE_INVALID_PROPERTY_TYPE; // unsupported type
-      break;
+         return DEVICE_INVALID_PROPERTY_TYPE;
    }
 
    if (!pProp->Set(pszValue))

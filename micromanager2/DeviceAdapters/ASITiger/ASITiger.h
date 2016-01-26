@@ -77,10 +77,12 @@ const char* const g_Msg_ERR_UNRECOGNIZED_ANSWER = "Unrecognized serial answer fr
 const char* const g_Msg_ERR_NOT_ENOUGH_AXES = "Do not have any axes installed";
 #define ERR_TOO_LARGE_ADDRESSES      10022   // if we have addresses 0x81 and higher without new firmware
 const char* const g_Msg_ERR_TOO_LARGE_ADDRESSES = "Need new firmware for more than 10 cards";
+#define ERR_INFO_COMMAND_NOT_SUPPORTED   10023   // can't receive output from INFO command because >1023 characters
+const char* const g_Msg_ERR_INFO_COMMAND_NOT_SUPPORTED = "Cannot use the INFO command due to Micro-Manager limitations";
 #define ERR_FILTER_WHEEL_NOT_READY   10030   // if filter wheel responds with error, e.g. it is not plugged in
 const char* const g_Msg_ERR_FILTER_WHEEL_NOT_READY = "Filter wheel doesn't appear to be connected";
 #define ERR_FILTER_WHEEL_SPINNING    10031   // if filter wheel is spinning and try to do something with it
-const char* const g_Msg_ERR_FILTER_WHEEL_SPINNING = "Filter wheel cannot be set to position when spinning";
+const char* const g_Msg_ERR_FILTER_WHEEL_SPINNING = "Filter wheel cannot be moved to position or settings changed while spinning";
 #define ERR_TIGER_DEV_NOT_SUPPORTED  10040
 const char* const g_Msg_ERR_TIGER_DEV_NOT_SUPPORTED = "Device type not yet supported by Tiger device adapter";
 #define ERR_TIGER_PAIR_NOT_PRESENT   10041
@@ -242,8 +244,10 @@ const char* const g_ScannerTravelRangePropertyName = "ScannerTravelRange(deg)";
 const char* const g_CardVoltagePropertyName = "CardVoltage(V)"; // also used for micromirror
 const char* const g_PiezoModePropertyName = "PiezoMode";
 const char* const g_PiezoTravelRangePropertyName = "PiezoTravelRange(um)";
-const char* const g_PiezoModeFourOvershootPropertyName = "PiezoModeFourOvershoot(percent)";
-const char* const g_PiezoModeFourMaxTimePropertyName = "PiezoModeFourMaxTime(ms)";
+const char* const g_PiezoMaintainStatePropertyName = "PiezoMaintainState";
+const char* const g_PiezoMaintainOneOvershootPropertyName = "PiezoMaintainOneOvershoot(%)";
+const char* const g_PiezoMaintainOneMaxTimePropertyName = "PiezoMaintainOneMaxTime(ms)";
+const char* const g_AutoSleepDelayPropertyName = "AutoSleepDelay(min)";
 const char* const g_RunPiezoCalibrationPropertyName = "RunPiezoCalibration";
 
 // single axis property names
@@ -304,6 +308,8 @@ const char* const g_CRISPNumberAveragesPropertyName = "Number of Averages";
 const char* const g_CRISPSNRPropertyName = "Signal Noise Ratio";
 const char* const g_CRISPDitherErrorPropertyName = "Dither Error";
 const char* const g_CRISPLogAmpAGCPropertyName = "LogAmpAGC";
+const char* const g_CRISPNumberSkipsPropertyName = "Number of Skips";
+const char* const g_CRISPInFocusRangePropertyName = "In Focus Range(um)";
 
 // ring buffer property names
 const char* const g_RB_DelayPropertyName = "RingBufferDelayBetweenPoints(ms)";
@@ -504,6 +510,9 @@ const char* const g_StageMaintain_0 = "0 - Motors off but correct drift for 0.5 
 const char* const g_StageMaintain_1 = "1 - Motors off but correct drift indefinitely";
 const char* const g_StageMaintain_2 = "2 - Motors on indefinitely";
 const char* const g_StageMaintain_3 = "3 - Motors on during wait time";
+// maintain codes for piezo stages
+const char* const g_PiezoMaintain_0 = "0 - default";
+const char* const g_PiezoMaintain_1 = "1 - overshoot algorithm";
 // on/off control settings
 const char* const g_OffState = "Off";
 const char* const g_OnState = "On";
@@ -543,7 +552,6 @@ const char* const g_AdeptMode_0 = "0 - internal input closed-loop";
 const char* const g_AdeptMode_1 = "1 - external input closed-loop";
 const char* const g_AdeptMode_2 = "2 - internal input open-loop";
 const char* const g_AdeptMode_3 = "3 - external input open-loop";
-const char* const g_AdeptMode_4 = "4 - internal input closed-loop, speedup";
 // save settings options
 const char* const g_SaveSettingsX = "X - reload factory defaults on startup to card";
 const char* const g_SaveSettingsY = "Y - restore last saved settings from card";
@@ -567,7 +575,7 @@ const char* const g_AxisPolarityReversed = "Reversed";  // used for other stages
 // CRISP states
 const char* const g_CRISPState = "CRISP State";
 const char* const g_CRISP_I = "Idle";
-const char* const g_CRISP_R = "Ready";
+const char* const g_CRISP_R = "Ready";  // LED on and ready to move to K/lock state
 const char* const g_CRISP_D = "Dim";
 const char* const g_CRISP_K = "Lock";  // enter this state to try to lock, system will move to F when locked
 const char* const g_CRISP_F = "In Focus";  // a "read only" state, don't go to directly but via K state

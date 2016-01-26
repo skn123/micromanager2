@@ -50,12 +50,13 @@ public:
 	// Communication base functions
    int ClearComPort();
 
-   // SendCommand ignores response (currently implemented as call to QueryCommand
-   // TODO remove entirely and replace by call to QueryCommand
-	int SendCommand(const char *command);
-   int SendCommand(const string &command) { return SendCommand(command.c_str()); }
+   // gets the response to a command but waits a certain time for the response to come instead of looking for a terminator
+   // also doesn't necessarily wait for a complete response
+   int QueryCommandUnterminatedResponse(const char *command, const long timeoutMs);
+   int QueryCommandUnterminatedResponse(const string command, const long timeoutMs)
+      { return QueryCommandUnterminatedResponse(command.c_str(), timeoutMs); }
 
-   // QueryCommand also gets the response (optional 2nd parameter is the response's termination string) (optional 3rd parameter is delay between sending and reading response)
+   // QueryCommand gets the response (optional 2nd parameter is the response's termination string) (optional 3rd parameter is delay between sending and reading response)
    int QueryCommand(const char *command, const char *replyTerminator, const long delayMs); // all variants call this
    int QueryCommand(const char *command) { return QueryCommand(command, g_SerialTerminatorDefault, (long)0); }
    int QueryCommand(const string &command) { return QueryCommand(command.c_str(), g_SerialTerminatorDefault, (long)0); }
@@ -135,7 +136,7 @@ private:
 	static vector<char> ConvertStringVector2CharVector(const vector<string> v);
 	static vector<int> ConvertStringVector2IntVector(const vector<string> v);
 
-   string serialAnswer_;      // the last answer received from any call of
+   string serialAnswer_;      // the last answer received from any communication with the controller
    string manualSerialAnswer_; // last answer received when the SerialCommand property was used
    string serialCommand_;     // the last command sent, or can be set for calling commands without args
    string serialTerminator_;  // only used when parsing command sent via OnSerialCommand action handler
