@@ -34,7 +34,6 @@ import org.micromanager.asidispim.Utils.ListeningJTabbedPane;
 import org.micromanager.asidispim.Utils.MyDialogUtils;
 
 import java.awt.Container;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.prefs.Preferences;
 
 import javax.swing.JFrame;
@@ -51,11 +50,8 @@ import org.micromanager.asidispim.Utils.ControllerUtils;
 import static org.micromanager.asidispim.Utils.MyJavaUtils.isMac;
 
 import org.micromanager.asidispim.Utils.StagePositionUpdater;
-import org.micromanager.asidispim.api.ASIdiSPIMException;
 import org.micromanager.internalinterfaces.LiveModeListener; 
 import org.micromanager.utils.MMFrame;
-
-import mmcorej.CMMCore;
 
 //TODO devices tab automatically recognize default device names
 //TODO "swap sides" button (during alignment)
@@ -82,7 +78,6 @@ import mmcorej.CMMCore;
 //TODO smart default joystick settings (e.g. different defaults different panels/wheels)
 //TODO easily take "test acquisition" that wouldn't need to be saved, only do 1 timepoint, etc. From both acquisition and setup tabs (setup tab would only do that side)
 //TODO calculate and show estimated disk space as part of "durations"
-//TODO prevent user from closing plugin window during acquisition
 
 
 /**
@@ -95,7 +90,6 @@ public class ASIdiSPIMFrame extends MMFrame
       implements MMListenerInterface {
    
    private final ScriptInterface gui_;
-   private final CMMCore core_;
    private final Properties props_; 
    private final Prefs prefs_;
    private final Devices devices_;
@@ -118,20 +112,16 @@ public class ASIdiSPIMFrame extends MMFrame
    private final StagePositionUpdater stagePosUpdater_;
    private final ListeningJTabbedPane tabbedPane_;
    
-   private final AtomicBoolean hardwareInUse_ = new AtomicBoolean(false);   // true if acquisition or autofocus running
-   
    private static final String MAIN_PREF_NODE = "Main"; 
    
    /**
     * Creates the ASIdiSPIM plugin frame
     * @param gui - Micro-Manager script interface
-    * @throws ASIdiSPIMException
     */
-   public ASIdiSPIMFrame(ScriptInterface gui) throws ASIdiSPIMException {
+   public ASIdiSPIMFrame(ScriptInterface gui)  {
 
       // create interface objects used by panels
       gui_ = gui;
-      core_ = gui.getMMCore();
       prefs_ = new Prefs(Preferences.userNodeForPackage(this.getClass()));
       devices_ = new Devices(gui_, prefs_);
       props_ = new Properties(gui_, devices_, prefs_);
@@ -139,14 +129,6 @@ public class ASIdiSPIMFrame extends MMFrame
       joystick_ = new Joystick(devices_, props_);
       cameras_ = new Cameras(gui_, devices_, props_, prefs_);
       controller_ = new ControllerUtils(gui_, props_, prefs_, devices_, positions_);
-      
-      // make sure Live mode is turned off (panels assume it can manipulate
-      //   cameras which requires live mode to be turned off)
-      boolean liveModeOriginally = gui_.isLiveModeOn();
-      String cameraOriginal = gui_.getMMCore().getCameraDevice();
-      if (liveModeOriginally) {
-         gui_.enableLiveMode(false);
-      }
       
       // create the panels themselves
       // in some cases dependencies create required ordering
@@ -169,7 +151,7 @@ public class ASIdiSPIMFrame extends MMFrame
 
       dataAnalysisPanel_ = new DataAnalysisPanel(gui_, prefs_);
       autofocusPanel_ = new AutofocusPanel(gui_, devices_, props_, prefs_, autofocus_);
-      settingsPanel_ = new SettingsPanel(gui_, devices_, props_, prefs_, stagePosUpdater_);
+      settingsPanel_ = new SettingsPanel(devices_, props_, prefs_, stagePosUpdater_);
       stagePosUpdater_.oneTimeUpdate();  // needed for NavigationPanel
       helpPanel_ = new HelpPanel();
       statusSubPanel_ = new StatusSubPanel(devices_, props_, positions_, stagePosUpdater_);
@@ -219,26 +201,13 @@ public class ASIdiSPIMFrame extends MMFrame
                   for (Devices.Keys piezoKey : Devices.PIEZOS) {
                      if (devices_.isValidMMDevice(piezoKey)) {
                         if (props_.getPropValueInteger(piezoKey, Properties.Keys.AUTO_SLEEP_DELAY) > 0) {
-                           core_.setRelativePosition(devices_.getMMDevice(piezoKey), 0);
+                           gui_.getMMCore().setRelativePosition(devices_.getMMDevice(piezoKey), 0);
                         }
                      }
                   }
                } catch (Exception e) {
                   MyDialogUtils.showError("Could not reset piezo's positions");
                }
-            }
-         }
-      });
-      MMStudio.getInstance().getSnapLiveManager().addLiveModeListener(new LiveModeListener() {
-         // update camera/scanner settings
-         @Override
-         public void liveModeEnabled(boolean enabled) {
-            if (enabled) {
-               int scan = props_.getPropValueInteger(Devices.Keys.PLUGIN, Properties.Keys.PLUGIN_CAMERA_LIVE_SCAN);
-               props_.setPropValue(new Devices.Keys[]{Devices.Keys.GALVOA, Devices.Keys.GALVOB},
-                     Properties.Keys.SPIM_LINESCAN_PERIOD, scan, true);
-               props_.setPropValue(new Devices.Keys[]{Devices.Keys.GALVOA, Devices.Keys.GALVOB},
-                     Properties.Keys.SA_PATTERN_X, Properties.Values.SAM_TRIANGLE, true);
             }
          }
       });
@@ -282,27 +251,6 @@ public class ASIdiSPIMFrame extends MMFrame
             "[" + this.getHeight() + "]"));
       glassPane.add(statusSubPanel_, "dock south");
       
-      // restore live mode and camera
-      if (liveModeOriginally) {
-         gui_.enableLiveMode(true);
-      }
-      try {
-         gui_.getMMCore().setCameraDevice(cameraOriginal);
-      } catch (Exception ex) {
-         // do nothing
-      }
-   }
-   
-   public void setHardwareInUse(boolean inuse) {
-      hardwareInUse_.set(inuse);
-   }
-   
-   public boolean getHardwareInUse() {
-      return hardwareInUse_.get();
-   }
-   
-   public void tabsSetEnabled(boolean enabled) {
-      tabbedPane_.setEnabled(enabled);
    }
    
    /**
@@ -348,15 +296,6 @@ public class ASIdiSPIMFrame extends MMFrame
     */
    public AutofocusPanel getAutofocusPanel() {
       return autofocusPanel_;
-   }
-
-   /**
-    * Do not get into the internals of this plugin without relying on
-    * ASIdiSPIM.api
-    * @return the currently used instance of the AutofocusPanel;
-    */
-   public Devices getDevices() {
-      return devices_;
    }
    
    // MMListener mandated member functions
@@ -415,7 +354,6 @@ public class ASIdiSPIMFrame extends MMFrame
    
 // TODO make this automatically call all panels' method
    private void windowClosing() {
-      // TODO force user to cancel any ongoing acquisition before closing
       acquisitionPanel_.windowClosing();
       setupPanelA_.windowClosing();
       setupPanelB_.windowClosing();

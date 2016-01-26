@@ -38,35 +38,11 @@ public interface ASIdiSPIMInterface {
    /**
     * Requests an acquisition using the current settings, i.e., the settings
     * as visible in the acquisition panel.  The definition of current
-    * settings may change in the future.  Throws exception if an acquisition
-    * is currently running or has been requested.  Does not block.
+    * settings may change in the future.  Does nothing if an acquisition
+    * is currently running or has been requested.
     * @see ASIdiSPIMInterface#stopAcquisition()
     */
    public void runAcquisition() throws ASIdiSPIMException;
-   
-   /**
-    * Requests an acquisition using the current settings, i.e., the settings
-    * as visible in the acquisition panel.  The definition of current
-    * settings may change in the future.  Throws exception if an acquisition
-    * is currently running or has been requested.  Blocks until complete.
-    * @return ImagePlus object with acquisition data
-    * @throws ASIdiSPIMException
-    */
-   public ij.ImagePlus runAcquisitionBlocking() throws ASIdiSPIMException;
-   
-   /**
-    * Moves the stages to the requested position, then requests
-    * an acquisition using the current settings, i.e., the settings
-    * as visible in the acquisition panel.  The definition of current
-    * settings may change in the future.  Throws exception if an acquisition
-    * is currently running or has been requested.  Blocks until complete.
-    * @param x requested position of X axis
-    * @param y requested position of Y axis
-    * @param f requested position of SPIM head, usually the F axis
-    * @return ImagePlus object with acquisition data
-    * @throws ASIdiSPIMException
-    */
-   public ij.ImagePlus runAcquisitionBlocking(double x, double y, double f) throws ASIdiSPIMException; 
    
    /**
     * Stops an acquisition, if one is currently running.  Also cancels a 
@@ -99,12 +75,6 @@ public interface ASIdiSPIMInterface {
     * @see ASIdiSPIMInterface#stopAcquisition()
     */
    public boolean isAcquisitionRequested() throws ASIdiSPIMException;
-   
-   /**
-    * @return ImagePlus object of last acquisition.
-    * @throws ASIdiSPIMException
-    */
-   public ij.ImagePlus getLastAcquisitionImagePlus() throws ASIdiSPIMException;
 
    /**
     * @return pathname on filesystem to last completed acquisition
@@ -442,17 +412,6 @@ public interface ASIdiSPIMInterface {
    public void setVolumeSampleExposure(double exposureMs) throws ASIdiSPIMException;
    
    /**
-    * @return true if autofocus will be performed during acquisition.
-    */
-   public boolean getAutofocusDuringAcquisition() throws ASIdiSPIMException;
-   
-   /**
-    * @param enable true to enable autofocus during acquisition.  Parameters for that
-    *   are set on the autofocus tab or using this API.
-    */
-   public void setAutofocusDuringAcquisition(boolean enable) throws ASIdiSPIMException;
-   
-   /**
     * @param side Devices.Sides.A or Devices.Sides.B
     * @return the imaging piezo's center position for acquisitions in specified side
     */
@@ -530,14 +489,14 @@ public interface ASIdiSPIMInterface {
 
    /**
     * @param side Devices.Sides.A or Devices.Sides.B
-    * @return sheet offset from center in units of degrees (not calibration offset)
+    * @return sheet offset from center in units of degrees
     * @deprecated out of laziness, can add if needed
     */
    public double getSideSheetOffset(Devices.Sides side) throws ASIdiSPIMException;
    
    /**
     * @param side Devices.Sides.A or Devices.Sides.B
-    * @param the sheet offset from center in units of degrees (not calibration offset)
+    * @param the sheet offset from center in units of degrees
     * @deprecated out of laziness, can add if needed
     */
    public void setSideSheetOffset(Devices.Sides side, double offset) throws ASIdiSPIMException;
@@ -548,33 +507,22 @@ public interface ASIdiSPIMInterface {
     * @throws ASIdiSPIMException
     * @deprecated out of laziness, can add if needed
     */
-   public double getSideCalibrationSlope(Devices.Sides side) throws ASIdiSPIMException;
+   public double getSideSlope(Devices.Sides side) throws ASIdiSPIMException;
    
    /**
     * @param side Devices.Sides.A or Devices.Sides.B
     * @param slope slope of calibration in um/degree
     * @deprecated out of laziness, can add if needed
     */
-   public void setSideCalibrationSlope(Devices.Sides side, double slope) throws ASIdiSPIMException;
-   
-   /**
-    * @param side Devices.Sides.A or Devices.Sides.B
-    * @return calibration offset in units of um
-    */
-   public double getSideCalibrationOffset(Devices.Sides side) throws ASIdiSPIMException;
-   
-   /**
-    * @param side Devices.Sides.A or Devices.Sides.B
-    * @param calibration offset in units of um
-    */
-   public void setSideCalibrationOffset(Devices.Sides side, double offset) throws ASIdiSPIMException;
+   public void setSideSlope(Devices.Sides side, double slope) throws ASIdiSPIMException;
    
    /**
     * Updates the offset with the current positions of the slice and imaging piezo,
     *   just like clicking the GUI button does
     * @param side Devices.Sides.A or Devices.Sides.B
+    * @deprecated out of laziness, can add if needed
     */
-   public void updateSideCalibrationOffset(Devices.Sides side) throws ASIdiSPIMException;
+   public void updateSideOffset(Devices.Sides side) throws ASIdiSPIMException;
    
    /**
     * Runs the autofocus just like a GUI button press.  If the autofocus
@@ -582,8 +530,20 @@ public interface ASIdiSPIMInterface {
     *   position but the offset isn't updated automatically.
     * @see ASIdiSPIMInterface#updateSideOffset()
     * @param side Devices.Sides.A or Devices.Sides.B
+    * @deprecated out of laziness, can add if needed
     */
    public void runAutofocusSide(Devices.Sides side) throws ASIdiSPIMException;
+   
+   /**
+    * @return true if autofocus will be performed during acquisition.
+    */
+   public boolean getAutofocusDuringAcquisition() throws ASIdiSPIMException;
+   
+   /**
+    * @param enable true to enable autofocus during acquisition.  Parameters for that
+    *   are set on the autofocus tab or using this API.
+    */
+   public void setAutofocusDuringAcquisition(boolean enable) throws ASIdiSPIMException;
    
    // following are not included out of laziness for now, if they are needed they can be added
    /**
@@ -627,36 +587,32 @@ public interface ASIdiSPIMInterface {
    /**
     * @return true if autofocus will be performed before starting the acquisition.
     *   Only applies if "autofocus during acquisition" has been enabled
-    * @deprecated out of laziness, can add if needed
     */
    public boolean getAutofocusBeforeAcquisition() throws ASIdiSPIMException;
    
    /**
     * @param enable true will run autofocus before the acquisition begins.
     *   Only applies if "autofocus during acquisition" has been enabled
-    * @deprecated out of laziness, can add if needed
     */
    public void setAutofocusBeforeAcquisition(boolean enable) throws ASIdiSPIMException;
    
    /**
     * @return how often (in time points) that the autofocus runs during acquisition.
     */
-   public int getAutofocusTimepointInterval() throws ASIdiSPIMException;
+   public int getAutofocusInterval() throws ASIdiSPIMException;
    
    /**
     * @param numTimepoints will run autofocus after this many time points
     */
-   public void setAutofocusTimepointInterval(int numTimepoints) throws ASIdiSPIMException;
+   public void setAutofocusInterval(int numTimepoints) throws ASIdiSPIMException;
    
    /**
     * @return which channel will be used for autofocus during acquisition
-    * @deprecated out of laziness, can add if needed
     */
    public String getAutofocusChannel() throws ASIdiSPIMException;
    
    /**
     * @param channel set the channel to be used for autofocus during acquisition
-    * @deprecated out of laziness, can add if needed
     */
    public void setAutofocusChannel(String channel) throws ASIdiSPIMException;
    
@@ -721,20 +677,14 @@ public interface ASIdiSPIMInterface {
    public void lowerSPIMHead() throws ASIdiSPIMException;
    
    /**
-    * @param lowered SPIM head position in microns when in lowered state ("start hunting")
+    * @param raised SPIM head position in microns when in lowered state ("start hunting")
     */
-   public void setSPIMHeadLoweredPosition(double lowered) throws ASIdiSPIMException; 
+   public void setSPIMHeadLoweredPosition(double raised) throws ASIdiSPIMException; 
    
    /**
     * @return SPIM head position in microns when in lowered state ("start hunting")
     */
    public double getSPIMHeadLoweredPosition() throws ASIdiSPIMException;
-   
-   /**
-    * Stops all motion by sending a halt signal to the Tiger controller,
-    *   like the button on the navigation panel
-    */
-   public void haltAllMotion() throws ASIdiSPIMException;
    
    /**
     * @return object with all acquisition settings.  Intended for informational purposes
@@ -748,22 +698,22 @@ public interface ASIdiSPIMInterface {
     * @return estimated duration of each slice in milliseconds according to current timing
     * @see ASIdiSPIMInterface#refreshEstimatedTiming()
     */
-   public double getEstimatedSliceDuration() throws ASIdiSPIMException;
+   public double getEstimatedSliceDuration();
    
    /**
     * @return estimated duration of each volume in milliseconds according to current timing
     * @see ASIdiSPIMInterface#refreshEstimatedTiming()
     */
-   public double getEstimatedVolumeDuration() throws ASIdiSPIMException;
+   public double getEstimatedVolumeDuration();
    
    /**
     * @return estimated duration of entire acquisition in seconds according to current timing
     * @see ASIdiSPIMInterface#refreshEstimatedTiming()
     */
-   public double getEstimatedAcquisitionDuration() throws ASIdiSPIMException;
+   public double getEstimatedAcquisitionDuration();
    
    /**
     * forces recalculation of estimated timings.
     */
-   public void refreshEstimatedTiming() throws ASIdiSPIMException;
+   public void refreshEstimatedTiming();
 }

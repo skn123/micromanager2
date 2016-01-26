@@ -5,6 +5,7 @@ import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.WindowManager;
+import ij.macro.MacroRunner;
 import ij.process.ImageProcessor;
 
 import java.awt.Cursor;
@@ -50,13 +51,14 @@ import org.micromanager.utils.FileDialogs;
 public class DataAnalysisPanel extends ListeningJPanel {
    private final Prefs prefs_;
    private final JPanel exportPanel_;
+   private final JPanel imageJPanel_;
    private final JTextField saveDestinationField_;
    private final JTextField baseNameField_;
    
    public static final String[] TRANSFORMOPTIONS = 
       {"None", "Rotate Right 90\u00B0", "Rotate Left 90\u00B0", "Rotate outward"};
    public static final String[] EXPORTFORMATS = 
-      {"mipav GenerateFusion", "Multiview Reconstruction (deprecated)"};
+      {"mipav GenerateFusion", "Multiview Reconstruction"};
    public static FileDialogs.FileType EXPORT_DATA_SET 
            = new FileDialogs.FileType("EXPORT_DATA_SET",
                  "Export to Location",
@@ -208,7 +210,64 @@ public class DataAnalysisPanel extends ListeningJPanel {
       
       // end export sub-panel
       
+      // start ImageJ sub-panel
+      imageJPanel_ = new JPanel(new MigLayout(
+              "",
+              "[center]",
+              "[]8[]"));
+      
+      imageJPanel_.setBorder(PanelUtils.makeTitledBorder("ImageJ"));
+      
+      JButton adjustBC = new JButton("Brightness/Contrast");
+      adjustBC.addActionListener(new ActionListener() {
+         @Override
+         public void actionPerformed(ActionEvent e) {
+            IJCommandThread t = new IJCommandThread("Brightness/Contrast...");
+            t.start();
+         }
+      });
+      imageJPanel_.add(adjustBC, "wrap");
+      
+      JButton splitChannels = new JButton("Split Channels");
+      splitChannels.addActionListener(new ActionListener() {
+         @Override
+         public void actionPerformed(ActionEvent e) {
+            IJCommandThread t = new IJCommandThread("Split Channels");
+            t.start();
+         }
+      });
+      imageJPanel_.add(splitChannels, "wrap");
+      
+      JButton zProjection = new JButton("Z Projection");
+      zProjection.addActionListener(new ActionListener() {
+         @Override
+         public void actionPerformed(ActionEvent e) {
+            IJCommandThread t = new IJCommandThread("Z Project...", "projection=[Max Intensity]");
+            t.start();
+         }
+      });
+      imageJPanel_.add(zProjection, "wrap");
+      
+      JButton closeImages = new JButton("Close All Images");
+      closeImages.addActionListener(new ActionListener() {
+         @Override
+         public void actionPerformed(ActionEvent e) {
+            final String macro = 
+                  "while (nImages>0) { " +
+                  "selectImage(nImages); " +
+                  " close(); " + 
+                  "}";
+            ij.macro.MacroRunner m = new MacroRunner(macro);
+            m.run();
+         }
+      });
+      imageJPanel_.add(closeImages, "wrap");
+      
+      // end ImageJ sub-panel
+            
+       
       this.add(exportPanel_);
+      this.add(imageJPanel_);
    }
    
    @Override
@@ -421,4 +480,29 @@ public class DataAnalysisPanel extends ListeningJPanel {
       }
    }
    
+   /**
+    * Make it easy to execute an ImageJ command in its own thread (for speed).
+    * After creating this object with the command (menu item) then call its start() method.
+    * TODO: see if this would be faster using ImageJ's Executer class (http://rsb.info.nih.gov/ij/developer/api/ij/Executer.html)
+    * @author Jon
+    */
+   class IJCommandThread extends Thread {
+      private final String command_;
+      private final String args_;
+      IJCommandThread(String command) {
+         super(command);
+         command_ = command;
+         args_ = "";
+      }
+      IJCommandThread(String command, String args) {
+         super(command);
+         command_ = command;
+         args_ = args;
+      }
+      @Override
+      public void run() {
+         IJ.run(command_, args_);
+      }
+   }
+  
 }
