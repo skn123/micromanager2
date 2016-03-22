@@ -37,7 +37,7 @@
 //
 // FUTURE DEVELOPMENT: From September 1 2007, the development of this adaptor is taken over by Andor Technology plc. Daigang Wen (d.wen@andor.com) is the main contact. Changes made by him will not be labeled.
 // LINUX DEVELOPMENT: From February 1, 2009, Linux compatibility was done by Karl Bellve at the Biomedical Imaging Group at the University of Massachusetts (Karl.Bellve@umassmed.edu)
-// CVS:           $Id: Andor.cpp 15957 2016-03-01 16:02:12Z christophe $
+// CVS:           $Id$
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
