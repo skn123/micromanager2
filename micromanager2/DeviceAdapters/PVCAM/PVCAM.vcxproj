@@ -160,6 +160,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="AcqConfig.cpp" />
+    <ClCompile Include="AcqThread.cpp" />
+    <ClCompile Include="Event.cpp" />
     <ClCompile Include="NotificationEntry.cpp" />
     <ClCompile Include="NotificationThread.cpp" />
     <ClCompile Include="PollingThread.cpp" />
@@ -170,8 +173,12 @@
     <ClCompile Include="PVCAMParam.cpp" />
     <ClCompile Include="PVCAMUniversal.cpp" />
     <ClCompile Include="PvFrameInfo.cpp" />
+    <ClCompile Include="PvRoiCollection.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AcqConfig.h" />
+    <ClInclude Include="AcqThread.h" />
+    <ClInclude Include="Event.h" />
     <ClInclude Include="NotificationEntry.h" />
     <ClInclude Include="NotificationThread.h" />
     <ClInclude Include="PollingThread.h" />
@@ -183,6 +190,8 @@
     <ClInclude Include="PVCAMParam.h" />
     <ClInclude Include="PvFrameInfo.h" />
     <ClInclude Include="PvRoi.h" />
+    <ClInclude Include="PvRoiCollection.h" />
+    <ClInclude Include="Version.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\MMDevice\MMDevice-SharedRuntime.vcxproj">

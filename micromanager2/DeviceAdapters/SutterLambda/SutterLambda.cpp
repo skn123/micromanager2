@@ -16,7 +16,7 @@
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-// CVS:           $Id: SutterLambda.cpp 15568 2015-06-30 00:17:16Z nico $
+// CVS:           $Id: SutterLambda.cpp 16045 2016-06-09 20:24:07Z cweisiger $
 //
 
 #ifdef WIN32
@@ -1041,6 +1041,11 @@ int Shutter::Shutdown()
    return DEVICE_OK;
 }
 
+
+bool Shutter::SupportsDeviceDetection(void)
+{
+   return true;
+}
 
 MM::DeviceDetectionStatus Shutter::DetectDevice(void)
 {

@@ -96,6 +96,7 @@ public:
 
    // so far, only the XYStage attempts to get the controller status on initialization, so
    // that's where the device detection is going for now
+   bool SupportsDeviceDetection(void);
    MM::DeviceDetectionStatus DetectDevice(void);
 
    // XYStage API
@@ -179,12 +180,14 @@ public:
   
    void GetName(char* pszName) const;
    bool Busy();
+   bool SupportsDeviceDetection(void);
    MM::DeviceDetectionStatus DetectDevice(void);
 
    // Stage API
    // ---------
   int SetPositionUm(double pos);
   int GetPositionUm(double& pos);
+  int SetRelativePositionUm(double d);
   int SetPositionSteps(long steps);
   int GetPositionSteps(long& steps);
   int SetOrigin();
@@ -301,6 +304,7 @@ public:
    int Initialize();
    int Shutdown();
 
+   bool SupportsDeviceDetection(void);
    MM::DeviceDetectionStatus DetectDevice(void);
 
    // AutoFocus API
@@ -334,6 +338,8 @@ public:
    int OnLogAmpAGC(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnNumSkips(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnInFocusRange(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnSum(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnOffset(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
    int GetFocusState(std::string& focusState);
@@ -351,6 +357,7 @@ private:
    long waitAfterLock_;
    int answerTimeoutMs_;
    unsigned int compileDay_;  // "days" since Jan 1 2000 since the firmware was compiled according to (compile day + 31*(compile month-1) + 12*31*(compile year-2000))
+   long sum_;
 };
 
 class AZ100Turret : public CStateDeviceBase<AZ100Turret>, public ASIBase
@@ -389,6 +396,7 @@ public:
 
    int Initialize();
    int Shutdown();
+   bool SupportsDeviceDetection(void);
    MM::DeviceDetectionStatus DetectDevice(void);
 
    int OnState(MM::PropertyBase* pProp, MM::ActionType eAct);
@@ -414,6 +422,7 @@ public:
    int Initialize();
    int Shutdown();
 
+   bool SupportsDeviceDetection(void);
    MM::DeviceDetectionStatus DetectDevice(void);
 
    void GetName (char* pszName) const;

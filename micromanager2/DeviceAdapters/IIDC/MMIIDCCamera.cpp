@@ -2,7 +2,8 @@
 //
 // AUTHOR:        Mark A. Tsuchida
 //
-// COPYRIGHT:     University of California, San Francisco, 2014
+// COPYRIGHT:     2014-2015, Regents of the University of California
+//                2016, Open Imaging, Inc.
 //
 // LICENSE:       This file is distributed under the BSD license.
 //                License text is included with the source distribution.
@@ -27,6 +28,7 @@
 #include "IIDCError.h"
 #include "IIDCFeature.h"
 #include "IIDCVideoMode.h"
+#include "IIDCVendorAVT.h"
 
 #include "DeviceBase.h"
 #include "ModuleInterface.h"
@@ -34,7 +36,7 @@
 #ifdef _MSC_VER
 #include <stdlib.h> // _byteswap_ushort()
 #endif
-#ifndef WIN32
+#ifndef _WIN32
 #include <unistd.h> // swab()
 #endif
 
@@ -100,6 +102,12 @@ const char* const MMIIDC_Property_IsoSpeed = "Transmission speed (Mbps)";
 const char* const MMIIDC_Property_RightShift16BitSamples = "Right-shift 16-bit samples";
 const char* const MMIIDC_Property_Format7PacketSizeNegativeDelta = "Limit Format_7 packet size";
 const char* const MMIIDC_Property_VideoMode = "Video mode";
+const char* const MMIIDC_Property_Format7PacketSize = "Format_7 packet size";
+const char* const MMIIDC_Property_Format7PacketSizeMode = "Format_7 packet size mode";
+const char* const MMIIDC_Property_Format7PacketSizeMode_UseMax =
+   "Set to max when parameters change";
+const char* const MMIIDC_Property_Format7PacketSizeMode_KeepSetting =
+   "Keep last-set value when possible";
 const char* const MMIIDC_Property_MaxFramerate = "Maximum framerate (fps)";
 const char* const MMIIDC_Property_ExposureMs = MM::g_Keyword_Exposure;
 const char* const MMIIDC_Property_Binning = MM::g_Keyword_Binning;
@@ -157,41 +165,124 @@ inline bool HostIsLittleEndian()
 #define mmiidc_restrict restrict
 #endif
 
-inline void ByteSwap16(uint16_t* mmiidc_restrict dst, const uint16_t* mmiidc_restrict src, size_t count)
+inline void ApplySoftROI(void* mmiidc_restrict dst,
+      const void* mmiidc_restrict src, size_t bytesPerPixel,
+      size_t srcWidth, size_t /* srcHeight */,
+      size_t left, size_t top, size_t width, size_t height)
 {
+   size_t srcStart = top * srcWidth + left;
+
+   size_t byteSrcStart = srcStart * bytesPerPixel;
+   size_t byteSrcWidth = srcWidth * bytesPerPixel;
+   size_t byteWidth = width * bytesPerPixel;
+
+   uint8_t* destRow = static_cast<uint8_t*>(dst);
+   const uint8_t* srcRow = static_cast<const uint8_t*>(src) + byteSrcStart;
+   for (size_t r = 0; r < height; ++r)
+   {
+      memcpy(destRow, srcRow, byteWidth);
+      destRow += byteWidth;
+      srcRow += byteSrcWidth;
+   }
+}
+
+inline void ByteSwap16OutOfPlace(uint16_t* mmiidc_restrict dst,
+   const uint16_t* mmiidc_restrict src, size_t count)
+{
+   // TODO Rewrite using Boost.Endian once we upgrade Boost requirements
 #ifdef _MSC_VER
    for (size_t i = 0; i < count; ++i)
       dst[i] = _byteswap_ushort(src[i]);
-#elif !defined(WIN32)
+#elif defined(__APPLE__) || defined(_XOPEN_SOURCE)
    swab(src, dst, 2 * count);
 #else
-#error Need to implement byte swap for this platform
+   for (size_t i = 0; i < count; ++i)
+   {
+      dst[i] = (src[i] << 8) | (src[i] >> 8);
+#if defined(__GNUC__)
+      // __builtin_bswap16() was missing prior to GCC 4.8
+#   if ((__GNUC__ * 10000 \
+      + __GNUC_MINOR__ * 100 \
+      + __GNUC_PATCHLEVEL__) \
+      > 40800)
+      dst[i] = __builtin_bswap16(src[i]);
+#   elif (defined(__clang__) && __has_builtin(__builtin_bswap16))
+      dst[i] = __builtin_bswap16(src[i]);
+#   else
+      dst[i] = (src[i] << 8) | (src[i] >> 8);
+#   endif
+#else
+      dst[i] = (src[i] << 8) | (src[i] >> 8);
+#endif
+   }
 #endif
 }
 
-inline void RightShift16(uint16_t* mmiidc_restrict dst, const uint16_t* mmiidc_restrict src,
+inline void ByteSwap16(uint16_t* dst, const uint16_t* src, size_t count)
+{
+   // We can assume that unless source and destination are equal, they do not
+   // overlap
+   if (dst != src)
+   {
+      ByteSwap16OutOfPlace(dst, src, count);
+      return;
+   }
+
+   // Byte swap in place
+   // TODO Rewrite using Boost.Endian once we upgrade Boost requirements
+   for (size_t i = 0; i < count; ++i)
+   {
+#ifdef _MSC_VER
+      dst[i] = _byteswap_ushort(dst[i]);
+#elif defined(__GNUC__)
+      // __builtin_bswap16() was missing prior to GCC 4.8
+#   if ((__GNUC__ * 10000 \
+      + __GNUC_MINOR__ * 100 \
+      + __GNUC_PATCHLEVEL__) \
+      > 40800)
+      dst[i] = __builtin_bswap16(dst[i]);
+#   elif (defined(__clang__) && __has_builtin(__builtin_bswap16))
+      dst[i] = __builtin_bswap16(dst[i]);
+#   else
+      dst[i] = (dst[i] << 8) | (dst[i] >> 8);
+#   endif
+#else
+      dst[i] = (dst[i] << 8) | (dst[i] >> 8);
+#endif
+   }
+}
+
+inline void RightShift16OutOfPlace(uint16_t* mmiidc_restrict dst,
+      const uint16_t* mmiidc_restrict src,
       size_t count, unsigned shift)
 {
    for (size_t i = 0; i < count; ++i)
       dst[i] = src[i] >> shift;
 }
 
-inline void RightShift16InPlace(uint16_t* samples, size_t count, unsigned shift)
+inline void RightShift16(uint16_t* dst, const uint16_t* src,
+      size_t count, unsigned shift)
 {
+   // We can assume that unless source and destination are equal, they do not
+   // overlap
+   if (dst != src)
+   {
+      RightShift16OutOfPlace(dst, src, count, shift);
+      return;
+   }
+
    for (size_t i = 0; i < count; ++i)
-      samples[i] >>= shift;
+      dst[i] >>= shift;
 }
 
 
 /*
  * Convert to Micro-Manager's idiosyncratic RGB format
  */
-inline void RGB24To32(uint8_t* dst, const uint8_t* src, size_t count)
+inline void BGR24ToRGB32(uint8_t* dst, const uint8_t* src, size_t count)
 {
    for (size_t i = 0; i < count; ++i)
    {
-      // I seem to be getting BGR from images converted from iSight YUV422
-      // format on OS X. Would be nice to confirm with other cameras and OSs.
       dst[4 * i + 0] = src[3 * i + 2];
       dst[4 * i + 1] = src[3 * i + 1];
       dst[4 * i + 2] = src[3 * i + 0];
@@ -254,6 +345,9 @@ class MMIIDCHub {
    static boost::weak_ptr<Self> instance_s;
 
    MMIIDCHub() : iidc_(new IIDC::Interface()) {}
+   MMIIDCHub(boost::function<void (const std::string&, bool)> logger) :
+      iidc_(new IIDC::Interface(logger))
+   {}
 
 public:
    static boost::shared_ptr<Self> GetInstance()
@@ -261,6 +355,16 @@ public:
       if (boost::shared_ptr<Self> instance = instance_s.lock())
          return instance;
       boost::shared_ptr<Self> instance(new Self());
+      instance_s = instance;
+      return instance;
+   }
+
+   static boost::shared_ptr<Self> GetInstance(
+         boost::function<void (const std::string&, bool)> logger)
+   {
+      if (boost::shared_ptr<Self> instance = instance_s.lock())
+         return instance;
+      boost::shared_ptr<Self> instance(new Self(logger));
       instance_s = instance;
       return instance;
    }
@@ -287,6 +391,11 @@ public:
    {
       activeCameras_.erase(id);
    }
+
+   void RemoveLogger()
+   {
+      iidc_->RemoveLogger();
+   }
 };
 
 // Static member variable definition
@@ -309,7 +418,13 @@ MMIIDCCamera::MMIIDCCamera() :
    AddAllowedValue(MMIIDC_Property_PreInit1394Mode, MMIIDC_Property_PreInit1394Mode_1394A);
    AddAllowedValue(MMIIDC_Property_PreInit1394Mode, MMIIDC_Property_PreInit1394Mode_1394B);
 
-   CreateStringProperty(MMIIDC_Property_PreInitIsoSpeed, MMIIDC_Property_PreInitIsoSpeed_800,
+   CreateStringProperty(MMIIDC_Property_PreInitIsoSpeed,
+#ifdef _WIN32
+         // 800 Mbps does not appear to work on Windows (CMU driver)
+         MMIIDC_Property_PreInitIsoSpeed_400,
+#else
+         MMIIDC_Property_PreInitIsoSpeed_800,
+#endif
          false, 0, true);
    AddAllowedValue(MMIIDC_Property_PreInitIsoSpeed, MMIIDC_Property_PreInitIsoSpeed_100, 100);
    AddAllowedValue(MMIIDC_Property_PreInitIsoSpeed, MMIIDC_Property_PreInitIsoSpeed_200, 200);
@@ -371,12 +486,16 @@ MMIIDCCamera::Initialize()
 
    try
    {
-      hub_ = MMIIDCHub::GetInstance();
+      // We use this device for MMCore logging, if this is the first device.
+      hub_ = MMIIDCHub::GetInstance(
+            boost::bind(&MMIIDCCamera::LogIIDCMessage, this, _1, _2));
 
       if (cameraID == MMIIDC_Property_PreInitCameraID_NextAvailable || cameraID.empty())
          iidcCamera_ = hub_->GetNextAvailableCamera();
       else
          iidcCamera_ = hub_->GetCameraByID(cameraID);
+
+      LogMessage(("Camera info from libdc1394:\n" + iidcCamera_->GetInfoDump()).c_str(), true);
 
       iidcCamera_->Enable1394B(opMode == MMIIDC_Property_PreInit1394Mode_1394B);
       iidcCamera_->SetIsoSpeed(isoSpeed);
@@ -405,6 +524,8 @@ MMIIDCCamera::Initialize()
       if (err != DEVICE_OK)
          return err;
 
+      // We do not support binning the usual way. Format_7 video modes usually
+      // provide binning, but in a vendor-specific way.
       err = CreateIntegerProperty(MMIIDC_Property_Binning, 1, false);
       if (err != DEVICE_OK)
          return err;
@@ -413,8 +534,6 @@ MMIIDCCamera::Initialize()
       err = CreateIntegerProperty(MMIIDC_Property_TimeoutMs, 10000, false);
       if (err != DEVICE_OK)
          return err;
-
-      // TODO More properties
    }
    CATCH_AND_RETURN_ERROR
 
@@ -435,7 +554,14 @@ MMIIDCCamera::Shutdown()
       iidcCamera_.reset();
 
       if (!cameraID.empty())
+      {
+         // The first camera device is used for MMCore logging, so we need to
+         // disable it. For now, we do not bother to continue logging after the
+         // first camera has been unloaded.
+         hub_->RemoveLogger();
+
          hub_->PutCamera(cameraID);
+      }
    }
    CATCH_AND_RETURN_ERROR
 
@@ -466,15 +592,17 @@ MMIIDCCamera::SnapImage()
    if (err != DEVICE_OK)
       return err;
 
+   ResetTimebase();
+
    try
    {
       if (iidcCamera_->IsOneShotCapable())
          iidcCamera_->StartOneShotCapture(3, timeoutMs,
-               boost::bind(&MMIIDCCamera::SnapCallback, this, _1, _2, _3, _4),
+               boost::bind(&MMIIDCCamera::SnapCallback, this, _1, _2, _3, _4, _5),
                boost::function<void ()>());
       else
          iidcCamera_->StartContinuousCapture(3, 1, timeoutMs,
-               boost::bind(&MMIIDCCamera::SnapCallback, this, _1, _2, _3, _4),
+               boost::bind(&MMIIDCCamera::SnapCallback, this, _1, _2, _3, _4, _5),
                boost::function<void ()>());
       iidcCamera_->WaitForCapture();
    }
@@ -502,26 +630,14 @@ MMIIDCCamera::GetImageBufferSize() const
 unsigned
 MMIIDCCamera::GetImageWidth() const
 {
-   try
-   {
-      // TODO Update when supporting ROI
-      return static_cast<unsigned>(currentVideoMode_->GetMaxWidth());
-   }
-   CATCH_AND_LOG_ERROR
-   return 0;
+   return static_cast<unsigned>(roiWidth_);
 }
 
 
 unsigned
 MMIIDCCamera::GetImageHeight() const
 {
-   try
-   {
-      // TODO Update when supporting ROI
-      return static_cast<unsigned>(currentVideoMode_->GetMaxHeight());
-   }
-   CATCH_AND_LOG_ERROR
-   return 0;
+   return static_cast<unsigned>(roiHeight_);
 }
 
 
@@ -533,8 +649,10 @@ MMIIDCCamera::GetImageBytesPerPixel() const
       switch (currentVideoMode_->GetPixelFormat())
       {
          case IIDC::PixelFormatGray8:
+         case IIDC::PixelFormatRaw8:
             return 1;
          case IIDC::PixelFormatGray16:
+         case IIDC::PixelFormatRaw16:
             return 2;
          case IIDC::PixelFormatYUV444:
          case IIDC::PixelFormatYUV422:
@@ -559,6 +677,8 @@ MMIIDCCamera::GetNumberOfComponents() const
       {
          case IIDC::PixelFormatGray8:
          case IIDC::PixelFormatGray16:
+         case IIDC::PixelFormatRaw8:
+         case IIDC::PixelFormatRaw16:
             return 1;
          case IIDC::PixelFormatYUV444:
          case IIDC::PixelFormatYUV422:
@@ -598,20 +718,128 @@ MMIIDCCamera::SetExposure(double milliseconds)
 }
 
 
-int
-MMIIDCCamera::SetROI(unsigned, unsigned, unsigned, unsigned)
+static void
+ComputeHardROI(unsigned roiPos, unsigned roiSize, unsigned maxSize,
+      unsigned posUnit, unsigned sizUnit,
+      unsigned& hardPos, unsigned& hardSize)
 {
-   return DEVICE_UNSUPPORTED_COMMAND;
+   // Right/lower-most hardware ROI position to contain desired ROI
+   unsigned maxHardPos = posUnit * (roiPos / posUnit);
+
+   hardSize = maxSize; // Initialize to be defensive
+   bool ok = false;
+   for (hardPos = maxHardPos; ; hardPos -= posUnit)
+   {
+      // Smallest width/height to contain desired ROI, given hardPos
+      unsigned minHardSize = roiSize + roiPos - hardPos;
+
+      hardSize = sizUnit * ((minHardSize - 1) / sizUnit + 1);
+
+      // If posUnit is not a multiple of sizUnit, hardSize may overshoot the
+      // chip
+      if (hardPos + hardSize > maxSize)
+      {
+         if (hardPos == 0)
+            break; // Pathological, give up to prevent unsigned underflow
+         else
+            continue; // Try again after shifting hardPos left/up
+      }
+
+      ok = true;
+      break;
+   }
+
+   // In the unlikely situation where we still don't satisfy the constraints,
+   // set to full chip.
+   if (!ok)
+   {
+      hardPos = 0;
+      hardSize = maxSize;
+   }
+}
+
+
+int
+MMIIDCCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
+{
+   unsigned maxWidth = currentVideoMode_->GetMaxWidth();
+   unsigned maxHeight = currentVideoMode_->GetMaxHeight();
+
+   if (x + xSize > maxWidth)
+      return AdHocErrorCode("ROI exceeds allowed maximum size");
+   if (y + ySize > maxHeight)
+      return AdHocErrorCode("ROI exceeds allowed maximum size");
+   if (xSize == 0 || ySize == 0)
+      return AdHocErrorCode("ROI must not be empty");
+
+   roiLeft_ = x;
+   roiTop_ = y;
+   roiWidth_ = xSize;
+   roiHeight_ = ySize;
+
+   // Determine the minimal hard ROI that encompasses the desired ROI
+   unsigned posUnitH, posUnitV;
+   unsigned sizUnitH, sizUnitV;
+   try
+   {
+      iidcCamera_->GetImagePositionUnits(posUnitH, posUnitV);
+      iidcCamera_->GetImageSizeUnits(sizUnitH, sizUnitV);
+   }
+   CATCH_AND_RETURN_ERROR
+
+   unsigned hardLeft, hardTop, hardWidth, hardHeight;
+   ComputeHardROI(roiLeft_, roiWidth_, maxWidth,
+         posUnitH, sizUnitH,
+         hardLeft, hardWidth);
+   ComputeHardROI(roiTop_, roiHeight_, maxHeight,
+         posUnitV, sizUnitV,
+         hardTop, hardHeight);
+
+   // Remember how to apply soft ROI to images
+   softROILeft_ = roiLeft_ - hardLeft;
+   softROITop_ = roiTop_ - hardTop;
+
+   LogMessage("Requested ROI: (" +
+         boost::lexical_cast<std::string>(roiLeft_) + ", " +
+         boost::lexical_cast<std::string>(roiTop_) + ", " +
+         boost::lexical_cast<std::string>(roiWidth_) + ", " +
+         boost::lexical_cast<std::string>(roiHeight_) + ");\n" +
+         "Image position units: (" +
+         boost::lexical_cast<std::string>(posUnitH) + ", " +
+         boost::lexical_cast<std::string>(posUnitV) + ");\n" +
+         "Image size units: (" +
+         boost::lexical_cast<std::string>(sizUnitH) + ", " +
+         boost::lexical_cast<std::string>(sizUnitV) + ");\n" +
+         "Camera ROI: (" +
+         boost::lexical_cast<std::string>(hardLeft) + ", " +
+         boost::lexical_cast<std::string>(hardTop) + ", " +
+         boost::lexical_cast<std::string>(hardWidth) + ", " +
+         boost::lexical_cast<std::string>(hardHeight) + ");\n" +
+         "Software ROI (relative to camera ROI): (" +
+         boost::lexical_cast<std::string>(softROILeft_) + ", " +
+         boost::lexical_cast<std::string>(softROITop_) + ", " +
+         boost::lexical_cast<std::string>(roiWidth_) + ", " +
+         boost::lexical_cast<std::string>(roiHeight_) + ")", true);
+
+   try
+   {
+      iidcCamera_->SetImageROI(hardLeft, hardTop, hardWidth, hardHeight);
+   }
+   CATCH_AND_RETURN_ERROR
+
+   UpdateFramerate();
+
+   return DEVICE_OK;
 }
 
 
 int
 MMIIDCCamera::GetROI(unsigned& x, unsigned& y, unsigned& xSize, unsigned& ySize)
 {
-   // ROI not (yet) implemented, so return bounds of maximum ROI
-   x = y = 0;
-   xSize = currentVideoMode_->GetMaxWidth();
-   ySize = currentVideoMode_->GetMaxHeight();
+   x = roiLeft_;
+   y = roiTop_;
+   xSize = roiWidth_;
+   ySize = roiHeight_;
    return DEVICE_OK;
 }
 
@@ -619,8 +847,9 @@ MMIIDCCamera::GetROI(unsigned& x, unsigned& y, unsigned& xSize, unsigned& ySize)
 int
 MMIIDCCamera::ClearROI()
 {
-   // ROI not (yet) implemented, so this is a no-op.
-   return DEVICE_OK;
+   return SetROI(0, 0,
+         currentVideoMode_->GetMaxWidth(),
+         currentVideoMode_->GetMaxHeight());
 }
 
 
@@ -642,19 +871,21 @@ MMIIDCCamera::StartSequenceAcquisition(long count, double /*intervalMs*/, bool s
    if (err != DEVICE_OK)
       return err;
 
+   ResetTimebase();
+
    try
    {
       if (iidcCamera_->IsMultiShotCapable() && count < 65536)
       {
          iidcCamera_->StartMultiShotCapture(16, static_cast<uint16_t>(count), timeoutMs,
-               boost::bind(&MMIIDCCamera::SequenceCallback, this, _1, _2, _3, _4),
+               boost::bind(&MMIIDCCamera::SequenceCallback, this, _1, _2, _3, _4, _5),
                boost::bind(&MMIIDCCamera::SequenceFinishCallback, this));
       }
       else
       {
          size_t nrFrames = (count == LONG_MAX) ? static_cast<size_t>(count) : 0;
          iidcCamera_->StartContinuousCapture(16, nrFrames, timeoutMs,
-               boost::bind(&MMIIDCCamera::SequenceCallback, this, _1, _2, _3, _4),
+               boost::bind(&MMIIDCCamera::SequenceCallback, this, _1, _2, _3, _4, _5),
                boost::bind(&MMIIDCCamera::SequenceFinishCallback, this));
       }
    }
@@ -730,10 +961,52 @@ MMIIDCCamera::OnRightShift16BitSamples(MM::PropertyBase* pProp, MM::ActionType e
 int
 MMIIDCCamera::OnFormat7PacketSizeNegativeDelta(MM::PropertyBase*, MM::ActionType eAct)
 {
+   // This property can be used to disallow setting the Format_7 packet size
+   // too close to the allowed maximum (which, I have found, can result in
+   // corrupted images in some Linux environments -- although it is not clear
+   // how common).
    try
    {
       if (eAct == MM::AfterSet)
-         VideoModeDidChange();
+         UpdateFramerate();
+   }
+   CATCH_AND_RETURN_ERROR
+   return DEVICE_OK;
+}
+
+
+int
+MMIIDCCamera::OnFormat7PacketSize(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   try
+   {
+      if (eAct == MM::BeforeGet)
+      {
+         uint32_t packetSize;
+         if (currentVideoMode_->IsFormat7())
+            packetSize = iidcCamera_->GetFormat7PacketSize();
+         else
+            packetSize = cachedPacketSize_;
+         pProp->Set(static_cast<long>(packetSize));
+      }
+      else if (eAct == MM::AfterSet)
+      {
+         long v;
+         pProp->Get(v);
+         uint32_t packetSize = static_cast<uint32_t>(std::max(0L, v));
+         if (currentVideoMode_->IsFormat7())
+         {
+            cachedPacketSize_ = packetSize;
+            UpdateFramerate(true);
+            pProp->Set(static_cast<long>(cachedPacketSize_));
+         }
+         else
+         {
+            // Forbid changing, since we don't have a good way of validating the value
+            pProp->Set(static_cast<long>(cachedPacketSize_));
+            return AdHocErrorCode("Packet size cannot be changed when not in a Format_7 video mode");
+         }
+      }
    }
    CATCH_AND_RETURN_ERROR
    return DEVICE_OK;
@@ -938,8 +1211,11 @@ MMIIDCCamera::InitializeInformationalProperties()
       return err;
 
    boost::shared_ptr<IIDC::ShutterFeature> shutter = iidcCamera_->GetShutterFeature();
+   bool hasAbsoluteShutterControl =
+      iidcCamera_->GetVendorAVT()->HasExtendedShutter() ||
+      iidcCamera_->GetShutterFeature()->HasAbsoluteControl();
    err = CreateStringProperty(MMIIDC_Property_SupportsAbsoluteShutter,
-         shutter->HasAbsoluteControl() ? "Yes" : "No", true);
+         hasAbsoluteShutterControl ? "Yes" : "No", true);
    if (err != DEVICE_OK)
       return err;
 
@@ -996,6 +1272,8 @@ MMIIDCCamera::InitializeVideoMode()
          case IIDC::PixelFormatYUV422:
          case IIDC::PixelFormatYUV411:
          case IIDC::PixelFormatRGB8:
+         case IIDC::PixelFormatRaw8:
+         case IIDC::PixelFormatRaw16:
             videoModes_.push_back(mode);
             LogMessage("Video mode [" + mode->ToString() + "]: supported", true);
             break;
@@ -1054,11 +1332,14 @@ MMIIDCCamera::InitializeVideoModeDependentState()
 {
    cachedBitsPerSample_ = iidcCamera_->GetBitsPerSample();
 
+   // Always turn off "frame rate prioritized control"; as scientific imaging
+   // software, it is more important to us that the exposure ("shutter") be
+   // predictable
    boost::shared_ptr<IIDC::FrameRateFeature> prioritizedFramerate = iidcCamera_->GetFrameRateFeature();
    if (prioritizedFramerate->IsPresent() && prioritizedFramerate->IsSwitchable())
       prioritizedFramerate->SetOnOff(false);
 
-   iidcCamera_->SetMaxFramerate();
+   iidcCamera_->SetMaxFramerate(0);
    cachedFramerate_ = iidcCamera_->GetFramerate();
    LogMessage("IIDC Framerate now set to " +
          boost::lexical_cast<std::string>(cachedFramerate_) + " (fps)");
@@ -1068,6 +1349,21 @@ MMIIDCCamera::InitializeVideoModeDependentState()
          new CPropertyAction(this, &MMIIDCCamera::OnMaximumFramerate));
    if (err != DEVICE_OK)
       return err;
+
+   // For packet size, 8192 will be clipped to the maximum allowed when we
+   // switch to Format_7
+   cachedPacketSize_ = 8192;
+   err = CreateIntegerProperty(MMIIDC_Property_Format7PacketSize, cachedPacketSize_,
+         false, new CPropertyAction(this, &MMIIDCCamera::OnFormat7PacketSize));
+   if (err != DEVICE_OK)
+      return err;
+
+   err = CreateStringProperty(MMIIDC_Property_Format7PacketSizeMode,
+         MMIIDC_Property_Format7PacketSizeMode_UseMax, false);
+   AddAllowedValue(MMIIDC_Property_Format7PacketSizeMode,
+         MMIIDC_Property_Format7PacketSizeMode_UseMax);
+   AddAllowedValue(MMIIDC_Property_Format7PacketSizeMode,
+         MMIIDC_Property_Format7PacketSizeMode_KeepSetting);
 
    boost::shared_ptr<IIDC::ShutterFeature> shutter = iidcCamera_->GetShutterFeature();
    if (!shutter->IsPresent() || !shutter->HasManualMode())
@@ -1079,7 +1375,11 @@ MMIIDCCamera::InitializeVideoModeDependentState()
    {
       shutter->SetAutoMode(false);
 
-      if (shutter->HasAbsoluteControl())
+      if (iidcCamera_->GetVendorAVT()->HasExtendedShutter())
+      {
+         LogMessage("Camera has AVT-specific extended shutter control; using");
+      }
+      else if (shutter->HasAbsoluteControl())
       {
          LogMessage("Camera allows shutter control in absolute units; enabling");
          shutter->SetAbsoluteControl(true);
@@ -1099,6 +1399,10 @@ MMIIDCCamera::InitializeVideoModeDependentState()
       return err;
    std::pair<double, double> limits = GetExposureLimits();
    err = SetPropertyLimits(MMIIDC_Property_ExposureMs, limits.first, limits.second);
+   if (err != DEVICE_OK)
+      return err;
+
+   err = ClearROI();
    if (err != DEVICE_OK)
       return err;
 
@@ -1192,22 +1496,60 @@ MMIIDCCamera::InitializeFeatureProperties()
 
 
 int
-MMIIDCCamera::VideoModeDidChange()
+MMIIDCCamera::UpdateFramerate(bool forceKeepPacketSize)
 {
-   cachedBitsPerSample_ = iidcCamera_->GetBitsPerSample();
-
    int err;
    long format7PacketSizeDelta;
    err = GetProperty(MMIIDC_Property_Format7PacketSizeNegativeDelta, format7PacketSizeDelta);
    if (err != DEVICE_OK)
       return err;
 
-   iidcCamera_->SetMaxFramerate(static_cast<unsigned>(-format7PacketSizeDelta));
+   char packetSizeMode[MM::MaxStrLength];
+   err = GetProperty(MMIIDC_Property_Format7PacketSizeMode, packetSizeMode);
+   if (err != DEVICE_OK)
+      return err;
+   if (packetSizeMode == std::string(MMIIDC_Property_Format7PacketSizeMode_KeepSetting))
+      forceKeepPacketSize = true;
+
+   if (currentVideoMode_->IsFormat7() && forceKeepPacketSize)
+   {
+      iidcCamera_->SetFormat7PacketSize(cachedPacketSize_,
+            static_cast<unsigned>(-format7PacketSizeDelta));
+   }
+   else
+   {
+      iidcCamera_->SetMaxFramerate(static_cast<unsigned>(-format7PacketSizeDelta));
+   }
    cachedFramerate_ = iidcCamera_->GetFramerate();
+   if (currentVideoMode_->IsFormat7())
+      cachedPacketSize_ = iidcCamera_->GetFormat7PacketSize();
+
    LogMessage("IIDC Framerate now set to " +
          boost::lexical_cast<std::string>(cachedFramerate_) + " (fps)");
    err = OnPropertyChanged(MMIIDC_Property_MaxFramerate,
          boost::lexical_cast<std::string>(cachedFramerate_).c_str());
+   if (err != DEVICE_OK)
+      return err;
+
+   err = OnPropertyChanged(MMIIDC_Property_Format7PacketSize,
+         boost::lexical_cast<std::string>(cachedPacketSize_).c_str());
+   if (err != DEVICE_OK)
+      return err;
+
+   return DEVICE_OK;
+}
+
+
+int
+MMIIDCCamera::VideoModeDidChange()
+{
+   cachedBitsPerSample_ = iidcCamera_->GetBitsPerSample();
+
+   int err;
+   err = UpdateFramerate();
+   if (err != DEVICE_OK)
+      return err;
+   err = ClearROI();
    if (err != DEVICE_OK)
       return err;
 
@@ -1292,6 +1634,17 @@ MMIIDCCamera::VideoModeDidChange()
 void
 MMIIDCCamera::SetExposureImpl(double milliseconds)
 {
+   if (iidcCamera_->GetVendorAVT()->HasExtendedShutter())
+   {
+      uint32_t microseconds =
+         static_cast<uint32_t>(std::floor(1000.0 * milliseconds) + 0.5);
+      iidcCamera_->GetVendorAVT()->SetExtendedShutterUs(microseconds);
+      cachedExposure_ = GetExposureUncached();
+      return;
+   }
+
+   // Standard IIDC case
+
    boost::shared_ptr<IIDC::ShutterFeature> shutter = iidcCamera_->GetShutterFeature();
    if (!shutter->IsPresent() || !shutter->HasManualMode())
    {
@@ -1342,6 +1695,12 @@ MMIIDCCamera::SetExposureImpl(double milliseconds)
 double
 MMIIDCCamera::GetExposureUncached()
 {
+   if (iidcCamera_->GetVendorAVT()->HasExtendedShutter())
+   {
+      uint32_t microseconds = iidcCamera_->GetVendorAVT()->GetExtendedShutterUs();
+      return static_cast<double>(microseconds) / 1000.0;
+   }
+
    boost::shared_ptr<IIDC::ShutterFeature> shutter = iidcCamera_->GetShutterFeature();
    if (!shutter->IsPresent() || !shutter->IsReadable())
    {
@@ -1365,6 +1724,13 @@ MMIIDCCamera::GetExposureUncached()
 std::pair<double, double>
 MMIIDCCamera::GetExposureLimits()
 {
+   if (iidcCamera_->GetVendorAVT()->HasExtendedShutter())
+   {
+      return std::make_pair(
+            iidcCamera_->GetVendorAVT()->GetExtendedShutterMinUs() / 1000.0,
+            iidcCamera_->GetVendorAVT()->GetExtendedShutterMaxUs() / 1000.0);
+   }
+
    boost::shared_ptr<IIDC::ShutterFeature> shutter = iidcCamera_->GetShutterFeature();
    if (!shutter->IsPresent() || !shutter->HasManualMode())
    {
@@ -1385,198 +1751,304 @@ MMIIDCCamera::GetExposureLimits()
 }
 
 
+// Common processing pipeline for snap or sequence images
+// After performing all necessary format conversions to prepare the libdc1394
+// image for passing to MMCore, calls resultCallback with the resulting image.
+// The resultCallback is also passed the MM 'bytesPerPixel' indicating the
+// final format.
 void
-MMIIDCCamera::SnapCallback(const void* pixels, size_t width, size_t height, IIDC::PixelFormat format)
+MMIIDCCamera::ProcessImage(const void* source, bool ownResultBuffer,
+      IIDC::PixelFormat sourceFormat,
+      size_t sourceWidth, size_t sourceHeight,
+      size_t destLeft, size_t destTop,
+      size_t destWidth, size_t destHeight,
+      uint32_t timestampUs,
+      boost::function<void (const void*, size_t, uint32_t)> resultCallback)
 {
-   size_t bytesPerPixel;
+   // This function implements a fixed processing pipeline that minimizes
+   // unnecessary copying of the pixels.
+
+   // The code is way too long and ought to be refactored, but at the moment
+   // this is the simplest way to code it without either adding unnecessary
+   // image copying or developing an elaborate pipeline library, given the
+   // complicated requirements we need to satisfy (C++11 unique_ptr might make
+   // it easier to refactor).
+
+   // First, determine the necessary pixel format conversions.
+
+   size_t destBytesPerPixel;
    bool isRGB = false;
    bool doConvertColor = false;
-   switch (format)
+
+   switch (sourceFormat)
    {
       case IIDC::PixelFormatGray8:
-         bytesPerPixel = 1;
+      case IIDC::PixelFormatRaw8:
+         destBytesPerPixel = 1;
          break;
 
       case IIDC::PixelFormatGray16:
-         bytesPerPixel = 2;
+      case IIDC::PixelFormatRaw16:
+         destBytesPerPixel = 2;
          break;
 
       case IIDC::PixelFormatYUV444:
       case IIDC::PixelFormatYUV422:
       case IIDC::PixelFormatYUV411:
-         bytesPerPixel = 4;
+         destBytesPerPixel = 4;
          isRGB = true;
          doConvertColor = true;
          break;
 
       case IIDC::PixelFormatRGB8:
-         bytesPerPixel = 4;
+         destBytesPerPixel = 4;
          isRGB = true;
-         doConvertColor = false;
          break;
 
       default:
          BOOST_THROW_EXCEPTION(Error("Unsupported pixel format"));
    }
 
-   size_t bufferSize = width * height * bytesPerPixel;
-   snappedPixels_.reset(new unsigned char[bufferSize]);
+   // 'pixels' always points to the current image
+   const uint8_t* pixels = static_cast<const uint8_t*>(source);
+
+   // Scoped array objects to manage memory for intermediate buffers. Not all
+   // may be used depending on the code path. Any that are used persist until
+   // the result callback returns.
+   boost::scoped_array<uint8_t> bufferConvertedToRGB;
+   boost::scoped_array<uint8_t> bufferAppliedSoftROI;
+   boost::scoped_array<uint8_t> bufferConvertedTo32Bit;
+   boost::scoped_array<uint8_t> bufferByteSwapped;
+   boost::scoped_array<uint8_t> bufferRightShifted;
+
+   // In each of the following processing stages, 'pixels' is processed
+   // (possibly in place) and 'pixels' is pointed to the result. If the
+   // processing occurs out-of-place, the result is placed in an auto-deleted
+   // buffer (scoped_array) or the final destination (if no further
+   // out-of-place conversion is to occur).
+   bool needOwnedCopy = ownResultBuffer;
+   uint8_t* destination = 0;
+
+   /*
+    * Stage: Convert color (e.g. YUV) to RGB24
+    */
+
+   if (doConvertColor)
+   {
+      // Always place result in allocated buffer, since further processing
+      // (conversion to 32-bit format) is needed
+      uint8_t* dest = new uint8_t[sourceWidth * sourceHeight * 3];
+      bufferConvertedToRGB.reset(dest);
+      IIDC::ConvertToRGB8(dest, pixels,
+            sourceWidth, sourceHeight, sourceFormat);
+      pixels = dest;
+   }
+
+   /*
+    * Stage: Apply soft ROI
+    */
+
+   if (destWidth != sourceWidth || destHeight != sourceHeight)
+   {
+      size_t bpp = (isRGB ? 3 : destBytesPerPixel);
+      uint8_t* dest = new uint8_t[destWidth * destHeight * bpp];
+      // If grayscale, all following stages can be performed in-place, so we
+      // can write to the final result buffer
+      if (needOwnedCopy && !isRGB)
+      {
+         assert (destination == 0);
+         destination = dest;
+         needOwnedCopy = false;
+      }
+      else
+      {
+         bufferAppliedSoftROI.reset(dest);
+      }
+
+      ApplySoftROI(dest, pixels, bpp,
+            sourceWidth, sourceHeight,
+            destLeft, destTop, destWidth, destHeight);
+      pixels = dest;
+   }
+
+   /*
+    * Stage: Convert RGB24 to RGB32
+    */
 
    if (isRGB)
    {
-      const void* rgb24Pixels;
-      boost::scoped_array<uint8_t> converted;
-      if (doConvertColor)
+      uint8_t* dest = new uint8_t[destWidth * destHeight * 4];;
+      // All following stages can be performed in-place, so we can write to the
+      // final result buffer
+      if (needOwnedCopy)
       {
-         converted.reset(new uint8_t[width * height * 3]);
-         IIDC::ConvertToRGB8(converted.get(),
-               reinterpret_cast<const uint8_t*>(pixels),
-               width, height, format);
-         rgb24Pixels = converted.get();
+         assert (destination == 0);
+         destination = dest;
+         needOwnedCopy = false;
       }
       else
       {
-         rgb24Pixels = pixels;
+         bufferConvertedTo32Bit.reset(dest);
       }
-      RGB24To32(snappedPixels_.get(),
-            reinterpret_cast<const uint8_t*>(rgb24Pixels), width * height);
+
+      // We seem to get BGR images out of libdc1394 (seen with iSight YUV
+      // formats on OS X; AVT YUV or RGB formats on OS X and Windows), so
+      // handle BGR-to-RGB at the same time.
+      BGR24ToRGB32(dest, pixels, destWidth * destHeight);
+      pixels = dest;
    }
-   else
+
+   /*
+    * Stage: Byte-swap 16-bit samples if necessary
+    */
+
+   if (HostIsLittleEndian() && destBytesPerPixel == 2)
    {
-      if (HostIsLittleEndian() && bytesPerPixel == 2)
-         ByteSwap16(reinterpret_cast<uint16_t*>(snappedPixels_.get()),
-               reinterpret_cast<const uint16_t*>(pixels), width * height);
+      uint8_t* dest = 0;
+      if (!needOwnedCopy && pixels != source) // Can do in-place
+      {
+         dest = const_cast<uint8_t*>(pixels);
+      }
       else
-         std::memcpy(snappedPixels_.get(), pixels, bufferSize);
+      {
+         dest = new uint8_t[destWidth * destHeight * 2];
+         if (needOwnedCopy)
+         {
+            assert (destination == 0);
+            destination = dest;
+            needOwnedCopy = false;
+         }
+         else
+         {
+            bufferByteSwapped.reset(dest);
+         }
+      }
 
-      /*
-       * Some cameras return 16-bit samples MSB-aligned. If the user has
-       * requested, convert to normal LSB-aligned samples.
-       */
-      bool doRightShift = (bytesPerPixel == 2);
-      {
-         boost::lock_guard<boost::mutex> g(sampleProcessingMutex_);
-         doRightShift = doRightShift && rightShift16BitSamples_;
-      }
-      if (doRightShift)
-      {
-         unsigned shift = 16 - cachedBitsPerSample_;
-         RightShift16InPlace(reinterpret_cast<uint16_t*>(snappedPixels_.get()),
-               width * height, shift);
-      }
+      ByteSwap16(reinterpret_cast<uint16_t*>(dest),
+            reinterpret_cast<const uint16_t*>(pixels),
+            destWidth * destHeight);
+      pixels = dest;
    }
 
-   snappedWidth_ = width;
-   snappedHeight_ = height;
-   snappedBytesPerPixel_ = bytesPerPixel;
+   /*
+    * Stage: Right-shift less-than-16-bit samples if requested
+    */
+
+   bool doRightShift = (destBytesPerPixel == 2);
+   {
+      boost::lock_guard<boost::mutex> g(sampleProcessingMutex_);
+      doRightShift = doRightShift && rightShift16BitSamples_;
+   }
+   if (doRightShift)
+   {
+      uint8_t* dest = 0;
+      if (!needOwnedCopy && pixels != source) // Can do in-place
+      {
+         dest = const_cast<uint8_t*>(pixels);
+      }
+      else
+      {
+         dest = new uint8_t[destWidth * destHeight * 2];
+         if (needOwnedCopy)
+         {
+            assert (destination == 0);
+            destination = dest;
+            needOwnedCopy = false;
+         }
+         else
+         {
+            bufferRightShifted.reset(dest);
+         }
+      }
+
+      unsigned shift = 16 - cachedBitsPerSample_;
+      RightShift16(reinterpret_cast<uint16_t*>(dest),
+            reinterpret_cast<const uint16_t*>(pixels),
+            destWidth * destHeight, shift);
+      pixels = dest;
+   }
+
+   /*
+    * Final stage: Copy (if we need to own destination)
+    */
+
+   if (needOwnedCopy)
+   {
+      assert (pixels == source); // Haven't made a copy yet
+      destination = new uint8_t[destWidth * destHeight * destBytesPerPixel];
+      needOwnedCopy = false;
+      memcpy(destination, pixels, destWidth * destHeight * destBytesPerPixel);
+      pixels = destination;
+   }
+
+   resultCallback(pixels, destBytesPerPixel, timestampUs);
 }
 
 
 void
-MMIIDCCamera::SequenceCallback(const void* pixels, size_t width, size_t height, IIDC::PixelFormat format)
+MMIIDCCamera::SnapCallback(const void* pixels, size_t width, size_t height,
+   IIDC::PixelFormat format, uint32_t timestampUs)
 {
-   size_t bytesPerPixel;
-   bool isRGB = false;
-   bool doConvertColor = false;
-   switch (format)
-   {
-      case IIDC::PixelFormatGray8:
-         bytesPerPixel = 1;
-         break;
+   // Request that the callback be passed an owned pixel buffer
+   ProcessImage(pixels, true, format, width, height,
+         softROILeft_, softROITop_, roiWidth_, roiHeight_,
+         timestampUs,
+         boost::bind(&MMIIDCCamera::ProcessedSnapCallback,
+            this, _1, roiWidth_, roiHeight_, _2, _3));
+}
 
-      case IIDC::PixelFormatGray16:
-         bytesPerPixel = 2;
-         break;
 
-      case IIDC::PixelFormatYUV444:
-      case IIDC::PixelFormatYUV422:
-      case IIDC::PixelFormatYUV411:
-         bytesPerPixel = 4;
-         isRGB = true;
-         doConvertColor = true;
-         break;
+void
+MMIIDCCamera::SequenceCallback(const void* pixels, size_t width, size_t height,
+   IIDC::PixelFormat format, uint32_t timestampUs)
+{
+   // Request that the callback be passed an unowned pixel buffer, since the
+   // pixels will be copied to the Core
+   ProcessImage(pixels, false, format, width, height,
+         softROILeft_, softROITop_, roiWidth_, roiHeight_,
+         timestampUs,
+         boost::bind(&MMIIDCCamera::ProcessedSequenceCallback,
+            this, _1, roiWidth_, roiHeight_, _2, _3));
+}
 
-      case IIDC::PixelFormatRGB8:
-         bytesPerPixel = 4;
-         isRGB = true;
-         doConvertColor = false;
-         break;
 
-      default:
-         BOOST_THROW_EXCEPTION(Error("Unsupported pixel format"));
-   }
+void
+MMIIDCCamera::ProcessedSnapCallback(const void* pixels,
+      size_t width, size_t height, size_t bytesPerPixel,
+      uint32_t /*timestampUs*/)
+{
+   // We own pixels and must delete
+   snappedPixels_.reset(static_cast<const unsigned char*>(pixels));
+   snappedWidth_ = width;
+   snappedHeight_ = height;
+   snappedBytesPerPixel_ = bytesPerPixel;
+   // We don't yet have a mechanism to pass metadata (such as the timestamp) to
+   // the Core for snapped images.
+}
 
-   boost::scoped_array<uint8_t> converted;
-   boost::scoped_array<uint8_t> fourthChanAdded;
-   boost::scoped_array<uint16_t> swapped;
-   boost::scoped_array<uint16_t> shifted;
 
-   if (isRGB)
-   {
-      const void* rgb24Pixels;
-      if (doConvertColor)
-      {
-         converted.reset(new uint8_t[width * height * 3]);
-         IIDC::ConvertToRGB8(converted.get(),
-               reinterpret_cast<const uint8_t*>(pixels),
-               width, height, format);
-         rgb24Pixels = converted.get();
-      }
-      else
-      {
-         rgb24Pixels = pixels;
-      }
-      fourthChanAdded.reset(new uint8_t[width * height * 4]);
-      RGB24To32(fourthChanAdded.get(),
-            reinterpret_cast<const uint8_t*>(rgb24Pixels), width * height);
-      pixels = fourthChanAdded.get();
-   }
-   else
-   {
-      if (HostIsLittleEndian() && bytesPerPixel == 2)
-      {
-         swapped.reset(new uint16_t[width * height]);
-         ByteSwap16(swapped.get(), reinterpret_cast<const uint16_t*>(pixels),
-               width * height);
-         pixels = swapped.get();
-      }
-
-      /*
-       * Some cameras return 16-bit samples MSB-aligned. If the user has
-       * requested, convert to normal LSB-aligned samples.
-       */
-      bool doRightShift = (bytesPerPixel == 2);
-      {
-         boost::lock_guard<boost::mutex> g(sampleProcessingMutex_);
-         doRightShift = doRightShift && rightShift16BitSamples_;
-      }
-      if (doRightShift)
-      {
-         unsigned shift = 16 - cachedBitsPerSample_;
-         if (swapped) // Reuse the buffer
-         {
-            shifted.swap(swapped);
-            RightShift16InPlace(shifted.get(), width * height, shift);
-         }
-         else
-         {
-            shifted.reset(new uint16_t[width * height]);
-            RightShift16(shifted.get(),
-                  reinterpret_cast<const uint16_t*>(pixels),
-                  width * height, shift);
-         }
-         pixels = shifted.get();
-      }
-   }
-
-   /*
-    * Okay, ugliness begins. Close your eyes for the next 20 lines.
-    */
+void
+MMIIDCCamera::ProcessedSequenceCallback(const void* pixels,
+      size_t width, size_t height, size_t bytesPerPixel,
+      uint32_t timestampUs)
+{
+   Metadata md;
 
    char label[MM::MaxStrLength];
    GetLabel(label);
-   Metadata md;
    md.put("Camera", label);
+
+#ifndef _WIN32
+   // The Windows CMU backend does not provide a valid timestamp (the field
+   // contains garbage), so we skip it.
+   // Linux and OS X backends provide the 1394 bus timestamp, which is probably
+   // pretty accurate.
+   double timestampMs = ComputeRelativeTimestampMs(timestampUs);
+
+   md.put(MM::g_Keyword_Elapsed_Time_ms,
+         CDeviceUtils::ConvertToString(timestampMs));
+#endif
+
    std::string serializedMD(md.Serialize());
 
    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(pixels);
@@ -1589,16 +2061,23 @@ MMIIDCCamera::SequenceCallback(const void* pixels, size_t width, size_t height, 
    int err;
    err = GetCoreCallback()->InsertImage(this, bytes, uWidth, uHeight, uBytesPerPixel,
          serializedMD.c_str());
-   if (!stopOnOverflow_ && err == DEVICE_BUFFER_OVERFLOW)
+   if (err == DEVICE_BUFFER_OVERFLOW)
    {
-      GetCoreCallback()->ClearImageBuffer(this);
-      err = GetCoreCallback()->InsertImage(this, bytes, uWidth, uHeight, uBytesPerPixel,
-            serializedMD.c_str(), false);
+      if (!stopOnOverflow_)
+      {
+         GetCoreCallback()->ClearImageBuffer(this);
+         err = GetCoreCallback()->InsertImage(this, bytes, uWidth, uHeight, uBytesPerPixel,
+               serializedMD.c_str(), false);
+      }
+      else
+      {
+         BOOST_THROW_EXCEPTION(Error("Sequence buffer overflow"));
+      }
    }
    if (err != DEVICE_OK)
       BOOST_THROW_EXCEPTION(Error("Unknown error (" +
                boost::lexical_cast<std::string>(err) +
-               ") while placing image in circular buffer"));
+               ") while placing image in sequence buffer"));
 }
 
 
@@ -1606,6 +2085,32 @@ void
 MMIIDCCamera::SequenceFinishCallback()
 {
    GetCoreCallback()->AcqFinished(this, DEVICE_OK);
+}
+
+
+void
+MMIIDCCamera::ResetTimebase()
+{
+   boost::lock_guard<boost::mutex> lock(timebaseMutex_);
+   timebaseUs_ = 0;
+}
+
+
+double
+MMIIDCCamera::ComputeRelativeTimestampMs(uint32_t rawTimeStampUs)
+{
+   // We do not have any easy way to record the equivalent timestamp before
+   // starting the capture. Instead, we will use the timestamp of the first
+   // frame coming to us as the timebase.
+   {
+      boost::lock_guard<boost::mutex> lock(timebaseMutex_);
+      if (timebaseUs_ == 0)
+         std::swap(timebaseUs_, rawTimeStampUs);
+      else
+         rawTimeStampUs -= timebaseUs_;
+   }
+
+   return rawTimeStampUs / 1000.0;
 }
 
 
@@ -1617,4 +2122,11 @@ MMIIDCCamera::AdHocErrorCode(const std::string& message)
    int code = nextAdHocErrorCode_++;
    SetErrorText(code, message.c_str());
    return code;
+}
+
+
+void
+MMIIDCCamera::LogIIDCMessage(const std::string& message, bool isDebug)
+{
+   LogMessage(message.c_str(), isDebug);
 }

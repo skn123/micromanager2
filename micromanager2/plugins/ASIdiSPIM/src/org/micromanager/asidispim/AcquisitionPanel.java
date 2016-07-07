@@ -72,6 +72,9 @@ import net.miginfocom.swing.MigLayout;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
 import mmcorej.CMMCore;
 import mmcorej.StrVector;
 import mmcorej.TaggedImage;
@@ -261,17 +264,35 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
 
       volPanel_.setBorder(PanelUtils.makeTitledBorder("Volume Settings"));
 
+      if (!ASIdiSPIM.oSPIM) {
+      } else {
+         props_.setPropValue(Devices.Keys.PLUGIN,
+               Properties.Keys.PLUGIN_NUM_SIDES, "1");
+      }
       volPanel_.add(new JLabel("Number of sides:"));
       String [] str12 = {"1", "2"};
       numSides_ = pu.makeDropDownBox(str12, Devices.Keys.PLUGIN,
             Properties.Keys.PLUGIN_NUM_SIDES, str12[1]);
       numSides_.addActionListener(recalculateTimingDisplayAL);
+      if (!ASIdiSPIM.oSPIM) {
+      } else {
+         numSides_.setEnabled(false);
+      }
       volPanel_.add(numSides_, "wrap");
 
       volPanel_.add(new JLabel("First side:"));
       String[] ab = {Devices.Sides.A.toString(), Devices.Sides.B.toString()};
+      if (!ASIdiSPIM.oSPIM) {
+      } else {
+         props_.setPropValue(Devices.Keys.PLUGIN,
+               Properties.Keys.PLUGIN_FIRST_SIDE, Devices.Sides.A.toString());
+      }
       firstSide_ = pu.makeDropDownBox(ab, Devices.Keys.PLUGIN,
             Properties.Keys.PLUGIN_FIRST_SIDE, Devices.Sides.A.toString());
+      if (!ASIdiSPIM.oSPIM) {
+      } else {
+         firstSide_.setEnabled(false);
+      }
       volPanel_.add(firstSide_, "wrap");
       
       volPanel_.add(new JLabel("Delay before side [ms]:"));
@@ -1028,15 +1049,16 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       final float scanDuration = laserDuration + 2*scanLaserBufferTime;
       // scan will be longer than laser by 0.25ms at both start and end
       
-      // account for delay in scan position based on Bessel filter by starting the scan slightly earlier
-      // than we otherwise would; delay to start is (empirically) 0.07ms + 0.25/(freq in kHz)
-      // delay to midpoint is empirically 0.38/(freq in kHz) which is probably better measure, and closer to old 0.4/freq value
-      // group delay for bessel filter approx 1/w or ~0.16/freq (not sure why discrepancy from empirical value)
+      // account for delay in scan position due to Bessel filter by starting the scan slightly earlier
+      // than we otherwise would (Bessel filter selected b/c stretches out pulse without any ripples)
+      // delay to start is (empirically) 0.07ms + 0.25/(freq in kHz)
+      // delay to midpoint is empirically 0.38/(freq in kHz)
+      // group delay for 5th-order bessel filter ~0.39/freq from theory and ~0.4/freq from IC datasheet 
       final float scanFilterFreq = Math.max(props_.getPropValueFloat(Devices.Keys.GALVOA,  Properties.Keys.SCANNER_FILTER_X),
             props_.getPropValueFloat(Devices.Keys.GALVOB,  Properties.Keys.SCANNER_FILTER_X));
       float scanDelayFilter = 0;
       if (scanFilterFreq != 0) {
-         scanDelayFilter = MyNumberUtils.roundToQuarterMs(0.38f/scanFilterFreq);
+         scanDelayFilter = MyNumberUtils.roundToQuarterMs(0.39f/scanFilterFreq);
       }
       
       // If the PLogic card is used, account for 0.25ms delay it introduces to
@@ -1523,57 +1545,64 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       // do this before getting snapshot of sliceTiming_ in acqSettings
       recalculateSliceTiming(!minSlicePeriodCB_.isSelected());
       
-      AcquisitionSettings acqSettings = getCurrentAcquisitionSettings();
+      AcquisitionSettings acqSettingsOrig = getCurrentAcquisitionSettings();
       
       // if a test acquisition then only run single timpoint, no autofocus
       if (testAcq) {
-         acqSettings.useTimepoints = false;
-         acqSettings.numTimepoints = 1;
-         acqSettings.useAutofocus = false;
+         acqSettingsOrig.useTimepoints = false;
+         acqSettingsOrig.numTimepoints = 1;
+         acqSettingsOrig.useAutofocus = false;
          // if called from the setup panels then the side will be specified
          //   so we can do an appropriate single-sided acquisition
          // if called from the acquisition panel then NONE will be specified
          //   and run according to existing settings
          if (testAcqSide != Devices.Sides.NONE) {
-            acqSettings.numSides = 1;
-            acqSettings.firstSideIsA = (testAcqSide == Devices.Sides.A);
+            acqSettingsOrig.numSides = 1;
+            acqSettingsOrig.firstSideIsA = (testAcqSide == Devices.Sides.A);
          }
          
          // work around limitation of not being able to use PLogic per-volume switching with single side
          // => do per-volume switching instead (only difference should be extra time to switch)
-         if (acqSettings.useChannels && acqSettings.channelMode == MultichannelModes.Keys.VOLUME_HW
-               && acqSettings.numSides < 2) {
-            acqSettings.channelMode = MultichannelModes.Keys.VOLUME;
+         if (acqSettingsOrig.useChannels && acqSettingsOrig.channelMode == MultichannelModes.Keys.VOLUME_HW
+               && acqSettingsOrig.numSides < 2) {
+            acqSettingsOrig.channelMode = MultichannelModes.Keys.VOLUME;
          }
          
       }
       
-      double volumeDuration = computeActualVolumeDuration(acqSettings);
+      double volumeDuration = computeActualVolumeDuration(acqSettingsOrig);
       double timepointDuration = computeTimepointDuration();
-      long timepointIntervalMs = Math.round(acqSettings.timepointInterval*1000);
+      long timepointIntervalMs = Math.round(acqSettingsOrig.timepointInterval*1000);
       
       // use hardware timing if < 1 second between timepoints
       // experimentally need ~0.5 sec to set up acquisition, this gives a bit of cushion
       // cannot do this in getCurrentAcquisitionSettings because of mutually recursive
       // call with computeActualVolumeDuration()
-      if ( acqSettings.numTimepoints > 1
+      if ( acqSettingsOrig.numTimepoints > 1
             && timepointIntervalMs < (timepointDuration + 750)
-            && !acqSettings.isStageScanning) {
-         acqSettings.hardwareTimepoints = true;
+            && !acqSettingsOrig.isStageScanning) {
+         acqSettingsOrig.hardwareTimepoints = true;
       }
       
-      if (acqSettings.useMultiPositions) {
-         if (acqSettings.hardwareTimepoints
-               || ((acqSettings.numTimepoints > 1) 
+      if (acqSettingsOrig.useMultiPositions) {
+         if (acqSettingsOrig.hardwareTimepoints
+               || ((acqSettingsOrig.numTimepoints > 1) 
                      && (timepointIntervalMs < timepointDuration*1.2))) {
             // change to not hardwareTimepoints and warn user
             // but allow acquisition to continue
-            acqSettings.hardwareTimepoints = false;
+            acqSettingsOrig.hardwareTimepoints = false;
             MyDialogUtils.showError("Timepoint interval may not be sufficient "
                   + "depending on actual time required to change positions. "
                   + "Proceed at your own risk.");
          }
       }
+      
+      // now acqSettings should be read-only
+      final AcquisitionSettings acqSettings = acqSettingsOrig;
+      
+      // generate string for log file
+      Gson gson = new GsonBuilder().setPrettyPrinting().create();
+      final String acqSettingsJSON = gson.toJson(acqSettings);
       
       // get MM device names for first/second cameras to acquire
       String firstCamera, secondCamera;
@@ -1605,31 +1634,26 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       boolean usingDemoCam = (devices_.getMMDeviceLibrary(Devices.Keys.CAMERAA).equals(Devices.Libraries.DEMOCAM) && sideActiveA)
             || (devices_.getMMDeviceLibrary(Devices.Keys.CAMERAB).equals(Devices.Libraries.DEMOCAM) && sideActiveB);
       
-      int nrSides = acqSettings.numSides;
-      int nrSlices = acqSettings.numSlices;
-      int nrChannels = acqSettings.numChannels;
-      
       // set up channels
-      int nrChannelsSoftware = nrChannels;  // how many times we trigger the controller
-      int nrSlicesSoftware = nrSlices;
+      int nrChannelsSoftware = acqSettings.numChannels;  // how many times we trigger the controller per stack
+      int nrSlicesSoftware = acqSettings.numSlices;
       String originalChannelConfig = "";
       boolean changeChannelPerVolumeSoftware = false;
-      MultichannelModes.Keys channelMode = acqSettings.channelMode;
       if (acqSettings.useChannels) {
-         if (nrChannels < 1) {
+         if (acqSettings.numChannels < 1) {
             MyDialogUtils.showError("\"Channels\" is checked, but no channels are selected");
             return false;
          }
          // get current channel so that we can restore it, then set channel appropriately
          originalChannelConfig = multiChannelPanel_.getCurrentConfig();
-         switch (channelMode) {
+         switch (acqSettings.channelMode) {
          case VOLUME:
             changeChannelPerVolumeSoftware = true;
             multiChannelPanel_.initializeChannelCycle();
             break;
          case VOLUME_HW:
          case SLICE_HW:
-            if (nrChannels == 1) {  // only 1 channel selected so don't have to really use hardware switching
+            if (acqSettings.numChannels == 1) {  // only 1 channel selected so don't have to really use hardware switching
                multiChannelPanel_.initializeChannelCycle();
                multiChannelPanel_.selectNextChannel();
             } else {  // we have at least 2 channels
@@ -1639,12 +1663,31 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                   return false;
                }
                nrChannelsSoftware = 1;
-               nrSlicesSoftware = nrSlices * nrChannels;
+               nrSlicesSoftware = acqSettings.numSlices * acqSettings.numChannels;
             }
             break;
          default:
-            MyDialogUtils.showError("Unsupported multichannel mode \"" + channelMode.toString() + "\"");
+            MyDialogUtils.showError("Unsupported multichannel mode \"" + acqSettings.channelMode.toString() + "\"");
             return false;
+         }
+      }
+      
+      if (acqSettings.hardwareTimepoints) {
+         // in hardwareTimepoints case we trigger controller once for all timepoints => need to
+         //   adjust number of frames we expect back from the camera during MM's SequenceAcquisition
+         if (acqSettings.cameraMode == CameraModes.Keys.OVERLAP) {
+            // For overlap mode we are send one extra trigger per side for PLogic slice-switching
+            //   and one extra trigger be channel per side for volume-switching (both PLogic and not).
+            // Very last trigger won't ever return a frame so subtract 1.
+            if (acqSettings.channelMode == MultichannelModes.Keys.SLICE_HW) {
+               nrSlicesSoftware = (((acqSettings.numSlices * acqSettings.numChannels) + 1) * acqSettings.numTimepoints) - 1;
+            } else {
+               nrSlicesSoftware = ((acqSettings.numSlices + 1) * acqSettings.numChannels * acqSettings.numTimepoints) - 1;
+            }
+         } else {
+            // we get back one image per trigger for all trigger modes other than OVERLAP
+            //   and we have already computed how many images that is (nrSlicesSoftware)
+            nrSlicesSoftware *= acqSettings.numTimepoints;
          }
       }
       
@@ -1717,8 +1760,9 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
       // if we want to do hardware timepoints make sure there's not a problem
       // lots of different situations where hardware timepoints can't be used...
       if (acqSettings.hardwareTimepoints) {
-         if (acqSettings.useChannels && channelMode == MultichannelModes.Keys.VOLUME_HW) {
+         if (acqSettings.useChannels && acqSettings.channelMode == MultichannelModes.Keys.VOLUME_HW) {
             // both hardware time points and volume channel switching use SPIMNumRepeats property
+            // TODO this seems a severe limitation, maybe this could be changed in the future via firmware change
             MyDialogUtils.showError("Cannot use hardware time points (small time point interval)"
                   + " with hardware channel switching volume-by-volume.");
             return false;
@@ -1745,7 +1789,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             return false;
          }
          if (spimMode == AcquisitionModes.Keys.NO_SCAN) {
-            MyDialogUtils.showError("Cannot do timepoints when no scan mode is used."
+            MyDialogUtils.showError("Cannot do hardware time points when no scan mode is used."
                   + " Use the number of slices to set the number of images to acquire.");
             return false;
          }
@@ -1796,7 +1840,6 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             }
          }
       }
-      
       
       // it appears the circular buffer, which is used by both cameras, can only have one 
       // image size setting => we require same image height and width for second camera if two-sided
@@ -1919,15 +1962,15 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             // flag that we are actually running acquisition now
             acquisitionRunning_.set(true);
             
-            ReportingUtils.logMessage("diSPIM plugin starting acquisition " + acqName);
+            ReportingUtils.logMessage("diSPIM plugin starting acquisition " + acqName + " with following settings: " + acqSettingsJSON);
             
             if (spimMode == AcquisitionModes.Keys.NO_SCAN && !acqSettings.separateTimepoints) {
-               // swap nrFrames and nrSlices
-               gui_.openAcquisition(acqName, rootDir, nrSlices, nrSides * nrChannels,
+               // swap nrFrames and numSlices
+               gui_.openAcquisition(acqName, rootDir, acqSettings.numSlices, acqSettings.numSides * acqSettings.numChannels,
                   nrFrames, nrPositions, true, save);
             } else {
-               gui_.openAcquisition(acqName, rootDir, nrFrames, nrSides * nrChannels,
-                  nrSlices, nrPositions, true, save);
+               gui_.openAcquisition(acqName, rootDir, nrFrames, acqSettings.numSides * acqSettings.numChannels,
+                  acqSettings.numSlices, nrPositions, true, save);
             }
             
             core_.setExposure(firstCamera, exposureTime);
@@ -1935,7 +1978,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                core_.setExposure(secondCamera, exposureTime);
             }
             
-            channelNames_ = new String[nrSides * nrChannels];
+            channelNames_ = new String[acqSettings.numSides * acqSettings.numChannels];
             
             // generate channel names and colors
             // also builds viewString for MultiViewRegistration metadata
@@ -1970,7 +2013,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             viewString = viewString.substring(0, viewString.length() - 1);
             
             // assign channel names and colors
-            for (int i = 0; i < nrSides * nrChannels; i++) {
+            for (int i = 0; i < acqSettings.numSides * acqSettings.numChannels; i++) {
                gui_.setChannelName(acqName, i, channelNames_[i]);
                gui_.setChannelColor(acqName, i, getChannelColor(i));
             }
@@ -2018,6 +2061,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             positions_.getUpdatedPosition(Devices.Keys.UPPERZDRIVE);
             gui_.setAcquisitionProperty(acqName, "Position_SPIM_Head",
                   positions_.getPositionString(Devices.Keys.UPPERZDRIVE));
+            gui_.setAcquisitionProperty(acqName, "SPIMAcqSettings", acqSettingsJSON);            
                       
             // get circular buffer ready
             // do once here but not per-trigger; need to ensure ROI changes registered
@@ -2073,7 +2117,7 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
             } catch (Exception e) {
                ReportingUtils.logError("error waiting for system");
             }
-            
+
             // Loop over all the times we trigger the controller's acquisition
             //  (although if multi-channel with volume switching is selected there
             //   is inner loop to trigger once per channel)
@@ -2168,10 +2212,6 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                      Thread.sleep(Math.round(PanelUtils.getSpinnerFloatValue(positionDelay_)));
                   }
                   
-                  if (acqSettings.hardwareTimepoints) {
-                     nrSlicesSoftware *= acqSettings.numTimepoints;
-                  }
-
                   // loop over all the times we trigger the controller
                   // usually just once, but will be the number of channels if we have
                   //  multiple channels and aren't using PLogic to change between them
@@ -2233,9 +2273,13 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                         }
 
                         // grab all the images from the cameras, put them into the acquisition
-                        int[] frNumber = new int[nrChannels*2];  // keep track of how many frames we have received for each "channel" (MM channel is our channel * 2 for the 2 cameras)
+                        int[] frNumber = new int[2*acqSettings.numChannels];  // keep track of how many frames we have received for each "channel" (MM channel is our channel * 2 for the 2 cameras)
                         int[] cameraFrNumber = new int[2];       // keep track of how many frames we have received from the camera
-                        int[] tpNumber = new int[nrChannels*2];  // keep track of which timepoint we are on for hardware timepoints
+                        int[] tpNumber = new int[2*acqSettings.numChannels];  // keep track of which timepoint we are on for hardware timepoints
+                        boolean skipNextImage = false;  // hardware timepoints have to drop spurious images with overlap mode
+                        final boolean checkForSkips = acqSettings.hardwareTimepoints && (acqSettings.cameraMode == CameraModes.Keys.OVERLAP);
+                        final boolean skipPerSide = acqSettings.useChannels && (acqSettings.numChannels > 1)
+                              && (acqSettings.channelMode == MultichannelModes.Keys.SLICE_HW); 
                         boolean done = false;
                         long timeout2;  // how long to wait between images before timing out
                         timeout2 = Math.max(2000, Math.round(5*sliceDuration));
@@ -2249,39 +2293,45 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                               now = System.currentTimeMillis();
                               if (core_.getRemainingImageCount() > 0) {  // we have an image to grab
                                  TaggedImage timg = core_.popNextTaggedImage();
-                                 String camera = (String) timg.tags.get("Camera");
+                                 
+                                 if (skipNextImage) {
+                                    skipNextImage = false;
+                                    continue;  // goes to next iteration of this loop without doing anything else
+                                 }
 
-                                 // figure out which channel index the acquisition is using
+                                 // figure out which channel index this frame belongs to
+                                 // "channel index" is channel of MM acquisition
+                                 // channel indexes will go from 0 to (numSides * numChannels - 1)
+                                 // if double-sided then second camera gets odd channel indexes (1, 3, etc.)
+                                 //    and adjacent pairs will be same color (e.g. 0 and 1 will be from first color, 2 and 3 from second, etc.)
+                                 String camera = (String) timg.tags.get("Camera");
                                  int cameraIndex = camera.equals(firstCamera) ? 0: 1;
-                                 int channelIndex;
-                                 switch (channelMode) {
+                                 int channelIndex_tmp;
+                                 switch (acqSettings.channelMode) {
                                  case NONE:
                                  case VOLUME:
-                                    channelIndex = channelNum;
+                                    channelIndex_tmp = channelNum;
                                     break;
                                  case VOLUME_HW:
-                                    channelIndex = cameraFrNumber[cameraIndex] / nrSlices;  // want quotient only
+                                    channelIndex_tmp = cameraFrNumber[cameraIndex] / acqSettings.numSlices;  // want quotient only
                                     break;
                                  case SLICE_HW:
-                                    channelIndex = cameraFrNumber[cameraIndex] % nrChannels;  // want modulo arithmetic
+                                    channelIndex_tmp = cameraFrNumber[cameraIndex] % acqSettings.numChannels;  // want modulo arithmetic
                                     break;
                                  default:
                                     // should never get here
                                     throw new Exception("Undefined channel mode");
                                  }
-
-                                 // 2nd camera always gets odd channel index 
-                                 // second side always comes after first side
                                  if (twoSided) {
-                                    channelIndex *= 2;
+                                    channelIndex_tmp *= 2;
                                  }
-                                 channelIndex += cameraIndex;
+                                 final int channelIndex = channelIndex_tmp + cameraIndex;
                                  
                                  int actualTimePoint = timePoint;
                                  if (acqSettings.hardwareTimepoints) {
                                     actualTimePoint = tpNumber[channelIndex];
                                  }
-
+                                 
                                  // add image to acquisition
                                  if (spimMode == AcquisitionModes.Keys.NO_SCAN && !acqSettings.separateTimepoints) {
                                     // create time series for no scan
@@ -2297,15 +2347,31 @@ public class AcquisitionPanel extends ListeningJPanel implements DevicesListener
                                  // update our counters to be ready for next image
                                  frNumber[channelIndex]++;
                                  cameraFrNumber[cameraIndex]++;
-                                 // if hardware timepoints then we only send one trigger
-                                 //   so we have to manually keep track of which timepoint we are on
+
+                                 // if hardware timepoints then we only send one trigger and
+                                 //   manually keep track of which channel/timepoint comes next
                                  if (acqSettings.hardwareTimepoints
-                                       && frNumber[channelIndex] >= nrSlices) {
+                                       && frNumber[channelIndex] >= acqSettings.numSlices) {  // only do this if we are done with the slices in this MM channel
+
+                                    // we just finished filling one MM channel with all its slices so go to next timepoint for this channel
                                     frNumber[channelIndex] = 0;
                                     tpNumber[channelIndex]++;
-                                    // update acquisition status message if needed
-                                    //   (don't otherwise reach code that does this)
-                                    //   Arbitrarily choose one possible channel to do this on 
+
+                                    // see if we are supposed to skip next image
+                                    if (checkForSkips) {
+                                       if (skipPerSide) {  // one extra image per side, only happens with per-slice HW switching
+                                          if ((channelIndex == (acqSettings.numChannels - 1))  // final channel index is last one of side
+                                                || (twoSided && (channelIndex == (acqSettings.numChannels - 2)))) {  // 2nd-to-last channel index for two-sided is also last one of side 
+                                             skipNextImage = true;
+                                          }
+                                       } else {  // one extra image per MM channel, this includes case of only 1 color (either multi-channel disabled or else only 1 channel selected)
+                                          skipNextImage = true;
+                                       }
+                                    }
+                                    
+                                    // update acquisition status message for hardware acquisition
+                                    //   (for non-hardware acquisition message is updated elsewhere)
+                                    //   Arbitrarily choose one possible channel to do this on.
                                     if (channelIndex == 0 && (numTimePointsDone_ < acqSettings.numTimepoints)) {
                                        numTimePointsDone_++;
                                        updateAcquisitionStatus(AcquisitionStatus.ACQUIRING);

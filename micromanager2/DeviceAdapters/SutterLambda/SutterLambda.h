@@ -19,7 +19,7 @@
 // AUTHOR:        Nenad Amodaj, nenad@amodaj.com, 10/26/2005
 //                Nico Stuurman, Oct. 2010
 //
-// CVS:           $Id: SutterLambda.h 15568 2015-06-30 00:17:16Z nico $
+// CVS:           $Id: SutterLambda.h 16045 2016-06-09 20:24:07Z cweisiger $
 //
 
 #ifndef _SUTTER_LAMBDA_H_
@@ -135,6 +135,7 @@ public:
    int OnND(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnControllerID(MM::PropertyBase* pProp, MM::ActionType eAct);
    // for device discovery:
+   bool SupportsDeviceDetection(void);
    MM::DeviceDetectionStatus DetectDevice(void);
 
 

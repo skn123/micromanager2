@@ -25,11 +25,6 @@
 //
 //
 
-#ifdef WIN32
-#define snprintf _snprintf 
-#pragma warning(disable: 4355)
-#endif
-
 #include "ASITiger.h"
 #include "ASITigerComm.h"
 #include "ASIXYStage.h"
@@ -41,6 +36,7 @@
 #include "ASICRISP.h"
 #include "ASILED.h"
 #include "ASIPLogic.h"
+#include "ASIPmt.h"
 #include <cstdio>
 #include <string>
 #include "../../MMDevice/MMDevice.h"
@@ -96,6 +92,8 @@ MODULE_API MM::Device* CreateDevice(const char* deviceName)
       return new CLED(deviceName);
    else if (deviceStr.compare(0, strlen(g_PLogicDeviceName), (string)g_PLogicDeviceName) == 0)
       return new CPLogic(deviceName);
+   else if (deviceStr.compare(0, strlen(g_PMTDeviceName), (string)g_PMTDeviceName) == 0)
+      return new CPMT(deviceName);
    else
       return 0;
 }

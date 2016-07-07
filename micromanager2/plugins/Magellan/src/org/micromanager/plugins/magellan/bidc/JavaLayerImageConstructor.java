@@ -216,16 +216,16 @@ public class JavaLayerImageConstructor {
         } else {
             if (GlobalSettings.getInstance().getDemoMode()) {
                 //add demo image
-                for (int c = 0; c < 6; c++) {
+                for (int c = 0; c < DemoModeImageData.getNumChannels(); c++) {
                     JSONObject tags = convertTaggedImage(core_.getTaggedImage()).tags;
                     MD.setChannelIndex(tags, c);
-                    MagellanEngine.addImageMetadata(tags, event, event.timeIndex_, c, currentTime, 1);
+                    MagellanEngine.addImageMetadata(tags, event, event.timeIndex_, c, currentTime - event.acquisition_.getStartTime_ms(), 1);
                     event.acquisition_.addImage(makeDemoImage(c, event.xyPosition_.getCenter(), event.zPosition_, tags));
                 }
             } else {
                 for (int c = 0; c < core_.getNumberOfCameraChannels(); c++) {
                     MagellanTaggedImage img = convertTaggedImage(core_.getTaggedImage(c));
-                    MagellanEngine.addImageMetadata(img.tags, event, event.timeIndex_, c, currentTime, 1);
+                    MagellanEngine.addImageMetadata(img.tags, event, event.timeIndex_, c, currentTime - event.acquisition_.getStartTime_ms(), 1);
                     event.acquisition_.addImage(img);
                 }
             }
@@ -233,18 +233,14 @@ public class JavaLayerImageConstructor {
     }
 
     private MagellanTaggedImage makeDemoImage(int camChannelIndex, Point2D.Double position, double zPos, JSONObject tags) {
-        Object demoPix;
-        try {
-            if (core_.getBytesPerPixel() == 1) {
-                demoPix = DemoModeImageData.getBytePixelData(camChannelIndex, (int) position.x,
-                        (int) position.y, (int) zPos, MD.getWidth(tags), MD.getHeight(tags));
-            } else {
-                demoPix = DemoModeImageData.getShortPixelData(camChannelIndex, (int) position.x,
-                        (int) position.y, (int) zPos, MD.getWidth(tags), MD.getHeight(tags));
-            }
-            return new MagellanTaggedImage(demoPix, tags);
-        } catch (Exception e) {
-            e.printStackTrace();
+      Object demoPix;
+      try {
+         demoPix = DemoModeImageData.getBytePixelData(camChannelIndex, (int) position.x,
+                 (int) position.y, (int) zPos, MD.getWidth(tags), MD.getHeight(tags));
+
+         return new MagellanTaggedImage(demoPix, tags);
+      } catch (Exception e) {
+         e.printStackTrace();
             Log.log("Problem getting demo data");
             throw new RuntimeException();
         }

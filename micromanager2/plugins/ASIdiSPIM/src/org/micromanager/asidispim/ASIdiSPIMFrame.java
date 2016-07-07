@@ -37,6 +37,9 @@ import java.awt.Container;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.prefs.Preferences;
 
+import javax.swing.BorderFactory;
+import javax.swing.border.Border;
+import javax.swing.JLabel;
 import javax.swing.JFrame;
 import javax.swing.JTabbedPane;
 import javax.swing.event.ChangeEvent;
@@ -79,6 +82,9 @@ import org.micromanager.utils.MMFrame;
 //       or else do autofocus after acquisition instead of before
 //TODO smart default joystick settings (e.g. different defaults different panels/wheels)
 //TODO calculate and show estimated disk space as part of "durations"
+//TODO Make it easier to adjust stack center (or start and end) including autodetect start/end based on content
+//TODO allow different stack center, number of slices, offset, or other settings for each XY position
+//TODO iconify tab labels and/or other parts of plugin
 
 
 /**
@@ -115,6 +121,7 @@ public class ASIdiSPIMFrame extends MMFrame
    private PiezoSleepPreventer piezoSleepPreventer_;
    
    private final AtomicBoolean hardwareInUse_ = new AtomicBoolean(false);   // true if acquisition or autofocus running
+   
    
    private static final String MAIN_PREF_NODE = "Main"; 
    
@@ -153,12 +160,16 @@ public class ASIdiSPIMFrame extends MMFrame
       
       acquisitionPanel_ = new AcquisitionPanel(gui_, devices_, props_, cameras_, 
             prefs_, stagePosUpdater_, positions_, controller_, autofocus_);
-      setupPanelA_ = new SetupPanel(gui_, devices_, props_, joystick_, 
+      setupPanelA_ = new SetupPanel(gui_, devices_, props_, joystick_,
             Devices.Sides.A, positions_, cameras_, prefs_, stagePosUpdater_,
             autofocus_);
-      setupPanelB_ = new SetupPanel(gui_, devices_, props_, joystick_,
-            Devices.Sides.B, positions_, cameras_, prefs_, stagePosUpdater_,
-            autofocus_);
+      if (!ASIdiSPIM.oSPIM) {
+         setupPanelB_ = new SetupPanel(gui_, devices_, props_, joystick_,
+               Devices.Sides.B, positions_, cameras_, prefs_, stagePosUpdater_,
+               autofocus_);
+      } else {
+         setupPanelB_ = null;
+      }
       navigationPanel_ = new NavigationPanel(gui_, devices_, props_, joystick_,
             positions_, prefs_, cameras_, stagePosUpdater_);
 
@@ -180,7 +191,9 @@ public class ASIdiSPIMFrame extends MMFrame
       }
       tabbedPane_.addLTab(navigationPanel_);  // tabIndex = 0
       tabbedPane_.addLTab(setupPanelA_);      // tabIndex = 1
-      tabbedPane_.addLTab(setupPanelB_);      // tabIndex = 2
+      if (!ASIdiSPIM.oSPIM) {
+         tabbedPane_.addLTab(setupPanelB_);      // tabIndex = 2
+      }
       tabbedPane_.addLTab(acquisitionPanel_); // tabIndex = 3
       tabbedPane_.addLTab(dataAnalysisPanel_);// tabIndex = 4
       tabbedPane_.addLTab(devicesPanel_);     // tabIndex = 5
@@ -190,6 +203,15 @@ public class ASIdiSPIMFrame extends MMFrame
       tabbedPane_.addLTab(helpPanel_);        // tabIndex = 8
       final int helpTabIndex = tabbedPane_.getTabCount() - 1;
       
+      // make taller tabs for easier navigation between them
+      // we create own labels instead of having JTabbedPane do it from titles
+      final Border paddingBorder = BorderFactory.createEmptyBorder(4,0,4,0);
+      for (int i=0; i<tabbedPane_.getTabCount(); i++) {
+         JLabel lab = new JLabel(((ListeningJPanel)tabbedPane_.getComponentAt(i)).getPanelName());
+         lab.setBorder(paddingBorder);
+         tabbedPane_.setTabComponentAt(i, lab);
+      }
+      
       // add the testing panel explicitly by uncommenting following lines
       // intended to only be done in short term for testing
       // TestingPanel testingPanel = new TestingPanel();
@@ -197,15 +219,19 @@ public class ASIdiSPIMFrame extends MMFrame
 
       // attach position updaters
       stagePosUpdater_.addPanel(setupPanelA_);
-      stagePosUpdater_.addPanel(setupPanelB_);
+      if (!ASIdiSPIM.oSPIM) {
+         stagePosUpdater_.addPanel(setupPanelB_);
+      }
       stagePosUpdater_.addPanel(navigationPanel_);
       stagePosUpdater_.addPanel(statusSubPanel_);
       
       piezoSleepPreventer_ = new PiezoSleepPreventer(gui_, devices_, props_);
 
       // attach live mode listeners
-      MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) setupPanelB_);
       MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) setupPanelA_);
+      if (!ASIdiSPIM.oSPIM) {
+         MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) setupPanelB_);
+      }
       MMStudio.getInstance().getSnapLiveManager().addLiveModeListener((LiveModeListener) navigationPanel_);
       MMStudio.getInstance().getSnapLiveManager().addLiveModeListener(new LiveModeListener() {
          // make sure to "wake up" any piezos with autosleep enabled before we start imaging 
@@ -246,7 +272,7 @@ public class ASIdiSPIMFrame extends MMFrame
 
       // set up the window
       add(tabbedPane_);  // add the pane to the GUI window
-      setTitle("ASI diSPIM Control"); 
+      setTitle(ASIdiSPIM.menuName + " Control"); 
       pack();           // shrinks the window as much as it can
       setResizable(false);
       
@@ -384,7 +410,9 @@ public class ASIdiSPIMFrame extends MMFrame
       // save selections as needed
       devices_.saveSettings();
       setupPanelA_.saveSettings();
-      setupPanelB_.saveSettings();
+      if (!ASIdiSPIM.oSPIM) {
+         setupPanelB_.saveSettings();
+      }
       navigationPanel_.saveSettings();
       acquisitionPanel_.saveSettings();
       settingsPanel_.saveSettings();
@@ -398,7 +426,9 @@ public class ASIdiSPIMFrame extends MMFrame
       // TODO force user to cancel any ongoing acquisition before closing
       acquisitionPanel_.windowClosing();
       setupPanelA_.windowClosing();
-      setupPanelB_.windowClosing();
+      if (!ASIdiSPIM.oSPIM) {
+         setupPanelB_.windowClosing();
+      }
    }
    
    @Override

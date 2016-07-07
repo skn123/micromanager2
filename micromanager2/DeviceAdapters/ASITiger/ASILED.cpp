@@ -22,10 +22,6 @@
 // BASED ON:      ASIStage.cpp and others
 //
 
-#ifdef WIN32
-#define snprintf _snprintf 
-#pragma warning(disable: 4355)
-#endif
 
 #include "ASILED.h"
 #include "ASITiger.h"
@@ -50,7 +46,7 @@ CLED::CLED(const char* name) :
    ASIPeripheralBase< ::CShutterBase, CLED >(name),
    open_(false),
    intensity_(50),
-   channel_(1),
+   channel_(0),  // 0 for LED on 2-axis card
    channelAxisChar_('X')
 {
    //Figure out what channel we are on
@@ -78,6 +74,7 @@ CLED::CLED(const char* name) :
       channelAxisChar_='R';
       break;
    case 1:
+   case 0:  // use 'X' for 2-axis LED
    default:
       channelAxisChar_='X';
       break;
@@ -92,7 +89,11 @@ int CLED::Initialize()
    // create MM description; this doesn't work during hardware configuration wizard but will work afterwards
    ostringstream command;
    command.str("");
-   command << g_LEDDeviceDescription << " HexAddr=" << addressString_<<" Channel="<<channel_<<":"<<channelAxisChar_;
+   command << g_LEDDeviceDescription << " HexAddr=" << addressString_;
+   if (channel_ > 0)
+   {
+      command << " Channel=" << channel_ << ":" << channelAxisChar_;
+   }
    CreateProperty(MM::g_Keyword_Description, command.str().c_str(), MM::String, true);
    
    CPropertyAction* pAct;
@@ -125,6 +126,16 @@ int CLED::Initialize()
    AddAllowedValue(g_SaveSettingsPropertyName, g_SaveSettingsZ);
    AddAllowedValue(g_SaveSettingsPropertyName, g_SaveSettingsOrig);
    AddAllowedValue(g_SaveSettingsPropertyName, g_SaveSettingsDone);
+
+   // LED current limit, card wide setting
+   // once mechanism for shared settings devices gets implemented use for this one
+   if (channel_ > 0)
+   {
+      pAct = new CPropertyAction (this, &CLED::OnCurrentLimit);
+      CreateProperty(g_LEDCurrentLimitPropertyName  , "700", MM::Integer, false, pAct);
+      SetPropertyLimits(g_LEDCurrentLimitPropertyName , 0, 1000);
+      UpdateProperty(g_LEDCurrentLimitPropertyName );
+   }
 
    initialized_ = true;
    return DEVICE_OK;
@@ -223,23 +234,26 @@ int CLED::OnRefreshProperties(MM::PropertyBase* pProp, MM::ActionType eAct)
 int CLED::OnIntensity(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    ostringstream command; command.str("");
+   
    long tmp = 0;
    if (eAct == MM::BeforeGet)
    {
       if (!refreshProps_ && initialized_)
          return DEVICE_OK;
-      UpdateOpenIntensity();  // will set intensity_ unless LED is turned off
-      if (!pProp->Set((long)intensity_))
+     UpdateOpenIntensity();  // will set intensity_ unless LED is turned off
+   if (!pProp->Set((long)intensity_))
          return DEVICE_INVALID_PROPERTY_VALUE;
    }
    else if (eAct == MM::AfterSet) {
       pProp->Get(tmp);
       if(open_)  // if we are closed then don't actually want to set the controller, only the internal
-      {
-         command << addressChar_ << "LED " << channelAxisChar_ << "=" << tmp;
+	  {
+	  command << addressChar_ << "LED " << channelAxisChar_ << "=" << tmp;
          RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A") );
-      }
+	  }
       intensity_ = tmp;
+
+     
    }
    return DEVICE_OK;
 }
@@ -266,3 +280,37 @@ int CLED::OnState(MM::PropertyBase* pProp, MM::ActionType eAct)
 
    return DEVICE_OK;
 }
+
+
+int CLED::OnCurrentLimit(MM::PropertyBase* pProp, MM::ActionType eAct)
+{ //sets the LED current limit , can also be used to control brightness. This is however a card wide setting.
+   ostringstream command; command.str("");
+   ostringstream replyprefix; replyprefix.str("");
+   long tmp = 0;
+   if (eAct == MM::BeforeGet)
+   {
+      if (!refreshProps_ && initialized_)
+      return DEVICE_OK;
+   command << addressChar_ << "WRDAC X?"; //same syntax for all channels
+   replyprefix << "X=";
+   RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), replyprefix.str()) );
+   RETURN_ON_MM_ERROR( hub_->ParseAnswerAfterEquals(tmp) );
+   //convert the reply in percent to milliamps
+   //at 100 , its 1200milliamps 
+
+   tmp=tmp*12;
+      
+   if (!pProp->Set((long)tmp))
+         return DEVICE_INVALID_PROPERTY_VALUE;
+   }
+   else if (eAct == MM::AfterSet) {
+      pProp->Get(tmp);
+         //convert milliamps to percent , total current is 1200ma
+		 tmp=(long)(tmp*0.08);
+		 command << addressChar_ << "WRDAC X="<< tmp;
+         RETURN_ON_MM_ERROR( hub_->QueryCommandVerify(command.str(), ":A") );
+      intensity_ = tmp;
+   }
+   return DEVICE_OK;
+}
+

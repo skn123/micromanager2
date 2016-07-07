@@ -2,7 +2,8 @@
 //
 // AUTHOR:        Mark A. Tsuchida
 //
-// COPYRIGHT:     University of California, San Francisco, 2014
+// COPYRIGHT:     2014-2015, Regents of the University of California
+//                2016, Open Imaging, Inc.
 //
 // LICENSE:       This file is distributed under the BSD license.
 //                License text is included with the source distribution.
@@ -17,9 +18,10 @@
 
 #pragma once
 
-#include "DeviceBase.h"
-
 #include "IIDCInterface.h"
+#include "IIDCCamera.h"
+
+#include "DeviceBase.h"
 
 #include <boost/thread.hpp>
 #include <boost/shared_array.hpp>
@@ -50,6 +52,7 @@ class MMIIDCCamera : public CCameraBase<MMIIDCCamera>
    // Cached settings and properties
    unsigned cachedBitsPerSample_; // Depends on video mode
    double cachedFramerate_; // Depends on video mode and Format_7 packet size
+   uint32_t cachedPacketSize_;
    double cachedExposure_; // User settable but may also depend on video mode
 
    boost::mutex sampleProcessingMutex_;
@@ -57,12 +60,25 @@ class MMIIDCCamera : public CCameraBase<MMIIDCCamera>
 
    bool stopOnOverflow_; // Set by StartSequenceAcquisition(), read by SequenceCallback()
 
+   boost::mutex timebaseMutex_;
+   uint32_t timebaseUs_; // 0 at start of sequence acquisition; timestamp of first frame
+
    int nextAdHocErrorCode_;
+
+   /*
+    * ROI state
+    * We have a "hard" ROI (implemented in camera and IIDC) and "soft" ROI
+    * (implemented in this device adapter), so that we can always set the ROI
+    * at 1-pixel resolution.
+    */
+   unsigned roiLeft_, roiTop_; // As presented to MMCore
+   unsigned roiWidth_, roiHeight_; // As presented to MMCore
+   unsigned softROILeft_, softROITop_; // Relative to hard ROI
 
    /*
     * Keep snapped image in our own buffer
     */
-   boost::shared_array<unsigned char> snappedPixels_;
+   boost::shared_array<const unsigned char> snappedPixels_;
    size_t snappedWidth_, snappedHeight_, snappedBytesPerPixel_;
 
 public:
@@ -123,6 +139,8 @@ private:
    int OnMaximumFramerate(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnRightShift16BitSamples(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnFormat7PacketSizeNegativeDelta(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnFormat7PacketSize(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnFormat7PacketSizeMode(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnVideoMode(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnExposure(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnBrightness(MM::PropertyBase* pProp, MM::ActionType eAct);
@@ -140,15 +158,43 @@ private:
    int InitializeVideoModeDependentState();
    int InitializeFeatureProperties();
 
+   // Set the framerate appropriately after parameters affecting possible frame
+   // rate have changed
+   int UpdateFramerate(bool forceKeepPacketSize = false);
+   // Update properties that might be affected after a video mode switch
    int VideoModeDidChange();
 
    void SetExposureImpl(double exposure);
    double GetExposureUncached();
    std::pair<double, double> GetExposureLimits();
 
-   void SnapCallback(const void* pixels, size_t width, size_t height, IIDC::PixelFormat format);
-   void SequenceCallback(const void* pixels, size_t width, size_t height, IIDC::PixelFormat format);
+   // Note: in the next bunch of functions, the uint32_t timestampUs is
+   // currently the only pass-through metadata. If anything more is added (such
+   // as other fields of dc1394video_frame_t), we should change this into an
+   // object (with unique_ptr semantics).
+
+   void ProcessImage(const void* source, bool ownResultBuffer,
+         IIDC::PixelFormat sourceFormat,
+         size_t sourceWidth, size_t sourceHeight,
+         size_t destLeft, size_t destTop,
+         size_t destWidth, size_t destHeight,
+         uint32_t timestampUs,
+         boost::function<void (const void*, size_t, uint32_t)> resultCallback);
+
+   void SnapCallback(const void* pixels, size_t width, size_t height,
+         IIDC::PixelFormat format, uint32_t timestampUs);
+   void SequenceCallback(const void* pixels, size_t width, size_t height,
+         IIDC::PixelFormat format, uint32_t timestampUs);
+   void ProcessedSnapCallback(const void* pixels, size_t width, size_t height,
+         size_t bytesPerPixel, uint32_t timestampUs);
+   void ProcessedSequenceCallback(const void* pixels, size_t width, size_t height,
+         size_t bytesPerPixel, uint32_t timestampUs);
    void SequenceFinishCallback();
 
+   void ResetTimebase();
+   double ComputeRelativeTimestampMs(uint32_t rawTimeStampUs);
+
    int AdHocErrorCode(const std::string& message);
+
+   void LogIIDCMessage(const std::string& message, bool isDebug);
 };

@@ -148,14 +148,20 @@ public class ControllerUtils {
             sliceDuration *= 2;
          }
          
-         final double requestedMotorSpeed = settings.stepSizeUm * Math.sqrt(2.) / sliceDuration / settings.numChannels;
+         // stage has to go faster than the slice spacing because viewing at an angle
+         // with diSPIM, angle is 45 degrees so go 1.4x faster
+         // with oSPIM, angle is 60 degrees so go 1.15x faster
+         final double speedFactor = ASIdiSPIM.oSPIM ? (2 / Math.sqrt(3.)) : Math.sqrt(2.);
+         
+         double requestedMotorSpeed = settings.stepSizeUm * speedFactor / sliceDuration / settings.numChannels;
          props_.setPropValue(xyDevice, Properties.Keys.STAGESCAN_MOTOR_SPEED, (float)requestedMotorSpeed);
          
          // ask for the actual speed and calculate the actual step size
          final double actualMotorSpeed = props_.getPropValueFloat(xyDevice, Properties.Keys.STAGESCAN_MOTOR_SPEED);
-         final double actualStepSizeUm = actualMotorSpeed / Math.sqrt(2.) * sliceDuration * settings.numChannels;  
+         final double actualStepSizeUm = actualMotorSpeed / speedFactor * sliceDuration * settings.numChannels;  
          
-         final double scanDistance = settings.numSlices * actualStepSizeUm * Math.sqrt(2.);
+         final double scanDistance = settings.numSlices * actualStepSizeUm * speedFactor;
+         
          Point2D.Double posUm;
          try {
             posUm = core_.getXYStagePosition(devices_.getMMDevice(xyDevice));
@@ -641,12 +647,13 @@ public class ControllerUtils {
     */
    public boolean triggerControllerStartAcquisition(
            final AcquisitionModes.Keys spimMode, final boolean isFirstSideA) {
+      final Devices.Keys galvoDevice = isFirstSideA ? Devices.Keys.GALVOA : Devices.Keys.GALVOB;
       switch (spimMode) {
       case STAGE_SCAN:
       case STAGE_SCAN_INTERLEAVED:
          // for stage scan we send trigger to stage card, which sends
          //    hardware trigger to the micro-mirror card
-         props_.setPropValue(Devices.Keys.GALVOA, Properties.Keys.SPIM_STATE,
+         props_.setPropValue(galvoDevice, Properties.Keys.SPIM_STATE,
                Properties.Values.SPIM_ARMED);
          props_.setPropValue(Devices.Keys.XYSTAGE, Properties.Keys.STAGESCAN_STATE,
                Properties.Values.SPIM_RUNNING);
@@ -657,7 +664,6 @@ public class ControllerUtils {
       case NO_SCAN:
          // in actuality only matters which device we trigger if there are
          //   two micro-mirror cards, which hasn't ever been done in practice yet
-         Devices.Keys galvoDevice = isFirstSideA ? Devices.Keys.GALVOA : Devices.Keys.GALVOB;
          props_.setPropValue(galvoDevice, Properties.Keys.SPIM_STATE,
                Properties.Values.SPIM_RUNNING, getSkipScannerWarnings(galvoDevice));
          break;

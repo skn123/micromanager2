@@ -236,9 +236,12 @@ CDemoCamera::CDemoCamera() :
    shouldRotateImages_(false),
    shouldDisplayImageNumber_(false),
    stripeWidth_(1.0),
+   supportsMultiROI_(false),
+   multiROIFillValue_(0),
    nComponents_(1),
    mode_(0),
-   imgManpl_(0)
+   imgManpl_(0),
+   pcf_(1.0)
 {
    memset(testProperty_,0,sizeof(testProperty_));
 
@@ -469,6 +472,15 @@ int CDemoCamera::Initialize()
    CreateFloatProperty("StripeWidth", 0, false, pAct);
    SetPropertyLimits("StripeWidth", 0, 10);
 
+   pAct = new CPropertyAction(this, &CDemoCamera::OnSupportsMultiROI);
+   CreateIntegerProperty("AllowMultiROI", 0, false, pAct);
+   AddAllowedValue("AllowMultiROI", "0");
+   AddAllowedValue("AllowMultiROI", "1");
+
+   pAct = new CPropertyAction(this, &CDemoCamera::OnMultiROIFillValue);
+   CreateIntegerProperty("MultiROIFillValue", 0, false, pAct);
+   SetPropertyLimits("MultiROIFillValue", 0, 65536);
+
    // Whether or not to use exposure time sequencing
    pAct = new CPropertyAction (this, &CDemoCamera::OnIsSequenceable);
    std::string propName = "UseExposureSequences";
@@ -482,6 +494,12 @@ int CDemoCamera::Initialize()
    CreateStringProperty(propName.c_str(), g_Sine_Wave, false, pAct);
    AddAllowedValue(propName.c_str(), g_Sine_Wave);
    AddAllowedValue(propName.c_str(), g_Norm_Noise);
+
+   // Photon Conversion Factor for Noise type camera
+   pAct = new CPropertyAction(this, &CDemoCamera::OnPCF);
+   propName = "Photon Conversion Factor";
+   CreateFloatProperty(propName.c_str(), pcf_, false, pAct);
+   SetPropertyLimits(propName.c_str(), 0.4, 4.0);
 
    // Simulate application crash
    pAct = new CPropertyAction(this, &CDemoCamera::OnCrash);
@@ -654,6 +672,8 @@ long CDemoCamera::GetImageBufferSize() const
 * If the hardware does not have this capability the software should simulate the ROI by
 * appropriately cropping each frame.
 * This demo implementation ignores the position coordinates and just crops the buffer.
+* If multiple ROIs are currently set, then this method clears them in favor of
+* the new ROI.
 * @param x - top-left corner coordinate
 * @param y - top-left corner coordinate
 * @param xSize - width
@@ -661,6 +681,10 @@ long CDemoCamera::GetImageBufferSize() const
 */
 int CDemoCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
+   multiROIXs_.clear();
+   multiROIYs_.clear();
+   multiROIWidths_.clear();
+   multiROIHeights_.clear();
    if (xSize == 0 && ySize == 0)
    {
       // effectively clear ROI
@@ -680,6 +704,7 @@ int CDemoCamera::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 
 /**
 * Returns the actual dimensions of the current ROI.
+* If multiple ROIs are set, then the returned ROI should encompass all of them.
 * Required by the MM::Camera API.
 */
 int CDemoCamera::GetROI(unsigned& x, unsigned& y, unsigned& xSize, unsigned& ySize)
@@ -702,7 +727,128 @@ int CDemoCamera::ClearROI()
    ResizeImageBuffer();
    roiX_ = 0;
    roiY_ = 0;
-      
+   multiROIXs_.clear();
+   multiROIYs_.clear();
+   multiROIWidths_.clear();
+   multiROIHeights_.clear();
+   return DEVICE_OK;
+}
+
+/**
+ * Queries if the camera supports multiple simultaneous ROIs.
+ * Optional method in the MM::Camera API; by default cameras do not support
+ * multiple ROIs.
+ */
+bool CDemoCamera::SupportsMultiROI()
+{
+   return supportsMultiROI_;
+}
+
+/**
+ * Queries if multiple ROIs have been set (via the SetMultiROI method). Must
+ * return true even if only one ROI was set via that method, but must return
+ * false if an ROI was set via SetROI() or if ROIs have been cleared.
+ * Optional method in the MM::Camera API; by default cameras do not support
+ * multiple ROIs, so this method returns false.
+ */
+bool CDemoCamera::IsMultiROISet()
+{
+   return multiROIXs_.size() > 0;
+}
+
+/**
+ * Queries for the current set number of ROIs. Must return zero if multiple
+ * ROIs are not set (including if an ROI has been set via SetROI).
+ * Optional method in the MM::Camera API; by default cameras do not support
+ * multiple ROIs.
+ */
+int CDemoCamera::GetMultiROICount(unsigned int& count)
+{
+   count = multiROIXs_.size();
+   return DEVICE_OK;
+}
+
+/**
+ * Set multiple ROIs. Replaces any existing ROI settings including ROIs set
+ * via SetROI.
+ * Optional method in the MM::Camera API; by default cameras do not support
+ * multiple ROIs.
+ * @param xs Array of X indices of upper-left corner of the ROIs.
+ * @param ys Array of Y indices of upper-left corner of the ROIs.
+ * @param widths Widths of the ROIs, in pixels.
+ * @param heights Heights of the ROIs, in pixels.
+ * @param numROIs Length of the arrays.
+ */
+int CDemoCamera::SetMultiROI(const unsigned int* xs, const unsigned int* ys,
+      const unsigned* widths, const unsigned int* heights,
+      unsigned numROIs)
+{
+   multiROIXs_.clear();
+   multiROIYs_.clear();
+   multiROIWidths_.clear();
+   multiROIHeights_.clear();
+   int minX = INT_MAX;
+   int minY = INT_MAX;
+   int maxX = 0;
+   int maxY = 0;
+   for (int i = 0; i < numROIs; ++i)
+   {
+      multiROIXs_.push_back(xs[i]);
+      multiROIYs_.push_back(ys[i]);
+      multiROIWidths_.push_back(widths[i]);
+      multiROIHeights_.push_back(heights[i]);
+      if (minX > xs[i])
+      {
+         minX = xs[i];
+      }
+      if (minY > ys[i])
+      {
+         minY = ys[i];
+      }
+      if (xs[i] + widths[i] > maxX)
+      {
+         maxX = xs[i] + widths[i];
+      }
+      if (ys[i] + heights[i] > maxY)
+      {
+         maxY = ys[i] + heights[i];
+      }
+   }
+   img_.Resize(maxX - minX, maxY - minY);
+   roiX_ = minX;
+   roiY_ = minY;
+   return DEVICE_OK;
+}
+
+/**
+ * Queries for current multiple-ROI setting. May be called even if no ROIs of
+ * any type have been set. Must return length of 0 in that case.
+ * Optional method in the MM::Camera API; by default cameras do not support
+ * multiple ROIs.
+ * @param xs (Return value) X indices of upper-left corner of the ROIs.
+ * @param ys (Return value) Y indices of upper-left corner of the ROIs.
+ * @param widths (Return value) Widths of the ROIs, in pixels.
+ * @param heights (Return value) Heights of the ROIs, in pixels.
+ * @param numROIs Length of the input arrays. If there are fewer ROIs than
+ *        this, then this value must be updated to reflect the new count.
+ */
+int CDemoCamera::GetMultiROI(unsigned* xs, unsigned* ys, unsigned* widths,
+      unsigned* heights, unsigned* length)
+{
+   unsigned roiCount = multiROIXs_.size();
+   if (roiCount > *length)
+   {
+      // This should never happen.
+      return DEVICE_INTERNAL_INCONSISTENCY;
+   }
+   for (int i = 0; i < roiCount; ++i)
+   {
+      xs[i] = multiROIXs_[i];
+      ys[i] = multiROIYs_[i];
+      widths[i] = multiROIWidths_[i];
+      heights[i] = multiROIHeights_[i];
+   }
+   *length = roiCount;
    return DEVICE_OK;
 }
 
@@ -1143,19 +1289,26 @@ int CDemoCamera::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
          // apply this value to the 'hardware'.
          long binFactor;
          pProp->Get(binFactor);
-			if(binFactor > 0 && binFactor < 10)
-			{
+         if(binFactor > 0 && binFactor < 10)
+         {
             // calculate ROI using the previous bin settings
             double factor = (double) binFactor / (double) binSize_;
             roiX_ /= factor;
             roiY_ /= factor;
+            for (int i = 0; i < multiROIXs_.size(); ++i)
+            {
+               multiROIXs_[i] /= factor;
+               multiROIYs_[i] /= factor;
+               multiROIWidths_[i] /= factor;
+               multiROIHeights_[i] /= factor;
+            }
             img_.Resize(img_.Width()/factor, img_.Height()/factor);
             binSize_ = binFactor;
             std::ostringstream os;
             os << binSize_;
             OnPropertyChanged("Binning", os.str().c_str());
-				ret=DEVICE_OK;
-			}
+            ret=DEVICE_OK;
+         }
       }break;
    case MM::BeforeGet:
       {
@@ -1508,6 +1661,39 @@ int CDemoCamera::OnStripeWidth(MM::PropertyBase* pProp, MM::ActionType eAct)
 
    return DEVICE_OK;
 }
+
+int CDemoCamera::OnSupportsMultiROI(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::AfterSet)
+   {
+      long tvalue = 0;
+      pProp->Get(tvalue);
+      supportsMultiROI_ = (tvalue != 0);
+   }
+   else if (eAct == MM::BeforeGet)
+   {
+      pProp->Set((long) supportsMultiROI_);
+   }
+
+   return DEVICE_OK;
+}
+
+int CDemoCamera::OnMultiROIFillValue(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::AfterSet)
+   {
+      long tvalue = 0;
+      pProp->Get(tvalue);
+      multiROIFillValue_ = (int) tvalue;
+   }
+   else if (eAct == MM::BeforeGet)
+   {
+      pProp->Set((long) multiROIFillValue_);
+   }
+
+   return DEVICE_OK;
+}
+
 /*
 * Handles "ScanMode" property.
 * Changes allowed Binning values to test whether the UI updates properly
@@ -1656,6 +1842,19 @@ int CDemoCamera::OnMode(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
+int CDemoCamera::OnPCF(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::BeforeGet)
+   {
+      pProp->Set(pcf_);
+   }
+   else if (eAct == MM::AfterSet)
+   {
+      pProp->Get(pcf_);
+   }
+   return DEVICE_OK;
+}
+
 
 int CDemoCamera::OnCrash(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
@@ -1750,19 +1949,21 @@ void CDemoCamera::GenerateEmptyImage(ImgBuffer& img)
 * 2. Gaussian noise
 */
 void CDemoCamera::GenerateSyntheticImage(ImgBuffer& img, double exp)
-{ 
+{
   
    MMThreadGuard g(imgPixelsLock_);
 
    if (mode_ == 1)
    {
       double max = 1 << GetBitDepth();
-      int mean = 10;
+      int offset = 10;
       if (max > 256)
       {
-         mean = 100;
+         offset = 100;
       }
-      AddBackgroundAndNoise(img, mean, 3.0);
+	   double readNoise = 3.0;
+      AddBackgroundAndNoise(img, offset, readNoise);
+      AddSignal (img, 50.0, exp, pcf_);
       if (imgManpl_ != 0)
       {
          imgManpl_->ChangePixels(img);
@@ -1773,7 +1974,7 @@ void CDemoCamera::GenerateSyntheticImage(ImgBuffer& img, double exp)
 	//std::string pixelType;
 	char buf[MM::MaxStrLength];
    GetProperty(MM::g_Keyword_PixelType, buf);
-	std::string pixelType(buf);
+   std::string pixelType(buf);
 
 	if (img.Height() == 0 || img.Width() == 0 || img.Depth() == 0)
       return;
@@ -2085,6 +2286,52 @@ void CDemoCamera::GenerateSyntheticImage(ImgBuffer& img, double exp)
             remainder /= 10;
         }
     }
+   if (multiROIXs_.size() > 0)
+   {
+      // Blank out all pixels that are not in an ROI.
+      // TODO: it would be more efficient to only populate pixel values that
+      // *are* in an ROI, but that would require substantial refactoring of
+      // this function.
+      for (int i = 0; i < imgWidth; ++i)
+      {
+         for (j = 0; j < img.Height(); ++j)
+         {
+            bool shouldKeep = false;
+            for (int k = 0; k < multiROIXs_.size(); ++k)
+            {
+               unsigned xOffset = multiROIXs_[k] - roiX_;
+               unsigned yOffset = multiROIYs_[k] - roiY_;
+               unsigned width = multiROIWidths_[k];
+               unsigned height = multiROIHeights_[k];
+               if (i >= xOffset && i < xOffset + width &&
+                        j >= yOffset && j < yOffset + height)
+               {
+                  // Pixel is inside an ROI.
+                  shouldKeep = true;
+                  break;
+               }
+            }
+            if (!shouldKeep)
+            {
+               // Blank the pixel.
+               long lIndex = imgWidth * j + i;
+               if (pixelType.compare(g_PixelType_8bit) == 0)
+               {
+                  *((unsigned char*) rawBuf + lIndex) = static_cast<unsigned char>(multiROIFillValue_);
+               }
+               else if (pixelType.compare(g_PixelType_16bit) == 0)
+               {
+                  *((unsigned short*) rawBuf + lIndex) = static_cast<unsigned short>(multiROIFillValue_);
+               }
+               else if (pixelType.compare(g_PixelType_32bit) == 0 ||
+                        pixelType.compare(g_PixelType_32bitRGB) == 0)
+               {
+                  *((unsigned int*) rawBuf + lIndex) = static_cast<unsigned int>(multiROIFillValue_);
+               }
+            }
+         }
+      }
+   }
    dPhase_ += lSinePeriod / 4.;
 }
 
@@ -2096,7 +2343,7 @@ void CDemoCamera::TestResourceLocking(const bool recurse)
 }
 
 /**
-* Generate an image with offsetplus noise
+* Generate an image with offset plus noise
 */
 void CDemoCamera::AddBackgroundAndNoise(ImgBuffer& img, double mean, double stdDev)
 { 
@@ -2141,6 +2388,63 @@ void CDemoCamera::AddBackgroundAndNoise(ImgBuffer& img, double mean, double stdD
       }
    }
 }
+
+
+/**
+* Adds signal to an image
+* Assume a homogenuous illumination
+* Calculates the signal for each pixel individually as:
+* photon flux * exposure time / conversion factor
+* Assumes QE of 100%
+*/
+void CDemoCamera::AddSignal(ImgBuffer& img, double photonFlux, double exp, double cf)
+{ 
+	char buf[MM::MaxStrLength];
+   GetProperty(MM::g_Keyword_PixelType, buf);
+	std::string pixelType(buf);
+
+   int maxValue = (1 << GetBitDepth()) -1;
+   long nrPixels = img.Width() * img.Height();
+   double photons = photonFlux * exp;
+   double shotNoise = sqrt(photons);
+   double digitalValue = photons / cf;
+   double shotNoiseDigital = shotNoise / cf;
+   if (pixelType.compare(g_PixelType_8bit) == 0)
+   {
+      unsigned char* pBuf = (unsigned char*) const_cast<unsigned char*>(img.GetPixels());
+      for (long i = 0; i < nrPixels; i++) 
+      {
+         double value = *(pBuf + i) + GaussDistributedValue(digitalValue, shotNoiseDigital);
+         if (value < 0) 
+         {
+            value = 0;
+         }
+         else if (value > maxValue)
+         {
+            value = maxValue;
+         }
+         *(pBuf + i) =  (unsigned char) value;
+      }
+   }
+   else if (pixelType.compare(g_PixelType_16bit) == 0)
+   {
+      unsigned short* pBuf = (unsigned short*) const_cast<unsigned char*>(img.GetPixels());
+      for (long i = 0; i < nrPixels; i++) 
+      {
+         double value = *(pBuf + i) + GaussDistributedValue(digitalValue, shotNoiseDigital);
+         if (value < 0) 
+         {
+            value = 0;
+         }
+         else if (value > maxValue)
+         {
+            value = maxValue;
+         }
+         *(pBuf + i) = (unsigned short) value;
+      }
+   }
+}
+
 
 /**
  * Uses Marsaglia polar method to generate Gaussian distributed value.  
@@ -3248,10 +3552,18 @@ int DemoShutter::OnState(MM::PropertyBase* pProp, MM::ActionType eAct)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 DemoMagnifier::DemoMagnifier () :
       position_ (0),
-      highMag_ (1.6) 
+      zoomPosition_(1.0),
+      highMag_ (1.6),
+      variable_ (false)
 {
    CPropertyAction* pAct = new CPropertyAction (this, &DemoMagnifier::OnHighMag);
    CreateFloatProperty("High Position Magnification", 1.6, false, pAct, true);
+
+   pAct = new CPropertyAction (this, &DemoMagnifier::OnVariable);
+   std::string propName = "Freely variable or fixed magnification";
+   CreateStringProperty(propName.c_str(), "Fixed", false, pAct, true);
+   AddAllowedValue(propName.c_str(), "Fixed");
+   AddAllowedValue(propName.c_str(), "Variable");
 
    // parent ID display
    CreateHubIDProperty();
@@ -3274,17 +3586,27 @@ int DemoMagnifier::Initialize()
    else
       LogMessage(NoHubError);
 
-   CPropertyAction* pAct = new CPropertyAction (this, &DemoMagnifier::OnPosition);
-   int ret = CreateStringProperty("Position", "1x", false, pAct);
-   if (ret != DEVICE_OK) 
-      return ret; 
+   if (variable_)
+   {
+      CPropertyAction* pAct = new CPropertyAction (this, &DemoMagnifier::OnZoom);
+      int ret = CreateFloatProperty("Zoom", zoomPosition_, false, pAct);
+      if (ret != DEVICE_OK) 
+         return ret; 
+      SetPropertyLimits("Zoom", 0.1, highMag_);
+   } else
+   {
+      CPropertyAction* pAct = new CPropertyAction (this, &DemoMagnifier::OnPosition);
+      int ret = CreateStringProperty("Position", "1x", false, pAct);
+      if (ret != DEVICE_OK) 
+         return ret; 
 
-   position_ = 0;
+      position_ = 0;
 
-   AddAllowedValue("Position", "1x"); 
-   AddAllowedValue("Position", highMagString().c_str()); 
+      AddAllowedValue("Position", "1x"); 
+      AddAllowedValue("Position", highMagString().c_str()); 
+   }
 
-   ret = UpdateStatus();
+   int ret = UpdateStatus();
    if (ret != DEVICE_OK)
       return ret;
 
@@ -3298,9 +3620,16 @@ std::string DemoMagnifier::highMagString() {
 }
 
 double DemoMagnifier::GetMagnification() {
-   if (position_ == 0)
-      return 1.0;
-   return highMag_;
+   if (variable_)
+   {
+      return zoomPosition_;
+   }
+   else 
+   {
+      if (position_ == 0)
+         return 1.0;
+      return highMag_;
+   }
 }
 
 int DemoMagnifier::OnPosition(MM::PropertyBase* pProp, MM::ActionType eAct) 
@@ -3326,6 +3655,20 @@ int DemoMagnifier::OnPosition(MM::PropertyBase* pProp, MM::ActionType eAct)
    return DEVICE_OK;
 }
 
+int DemoMagnifier::OnZoom(MM::PropertyBase* pProp, MM::ActionType eAct) 
+{
+   if (eAct == MM::BeforeGet)
+   {
+      pProp->Set(zoomPosition_);
+   }
+   else if (eAct == MM::AfterSet)
+   {
+      pProp->Get(zoomPosition_);
+      OnMagnifierChanged();
+   }
+   return DEVICE_OK;
+}
+
 int DemoMagnifier::OnHighMag(MM::PropertyBase* pProp, MM::ActionType eAct) 
 {
    if (eAct == MM::BeforeGet)
@@ -3340,6 +3683,27 @@ int DemoMagnifier::OnHighMag(MM::PropertyBase* pProp, MM::ActionType eAct)
       AddAllowedValue("Position", highMagString().c_str()); 
    }
 
+   return DEVICE_OK;
+}
+
+int DemoMagnifier::OnVariable(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::BeforeGet)
+   {
+      std::string response = "Fixed";
+      if (variable_)
+         response = "Variable";
+      pProp->Set(response.c_str());
+   }
+   else if (eAct == MM::AfterSet)
+   {
+      std::string response;
+      pProp->Get(response);
+      if (response == "Fixed")
+         variable_ = false;
+      else
+         variable_ = true;
+   }
    return DEVICE_OK;
 }
 

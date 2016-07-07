@@ -22,10 +22,6 @@
 // BASED ON:      ASIStage.cpp and others
 //
 
-#ifdef WIN32
-#define snprintf _snprintf 
-#pragma warning(disable: 4355)
-#endif
 
 #include "ASICRISP.h"
 #include "ASIHub.h"
@@ -138,6 +134,15 @@ int CCRISP::Initialize()
    CreateProperty(g_CRISPLogAmpAGCPropertyName, "", MM::Integer, true, pAct);
    UpdateProperty(g_CRISPLogAmpAGCPropertyName);
 
+   pAct = new CPropertyAction(this, &CCRISP::OnOffset);
+   CreateProperty(g_CRISPOffsetPropertyName, "", MM::Integer, true, pAct);
+   UpdateProperty(g_CRISPOffsetPropertyName);
+
+   pAct = new CPropertyAction(this, &CCRISP::OnSum);
+   CreateProperty(g_CRISPSumPropertyName, "", MM::Integer, true, pAct);
+   UpdateProperty(g_CRISPSumPropertyName);
+
+
    if (FirmwareVersionAtLeast(3.12))
    {
    	pAct = new CPropertyAction(this, &CCRISP::OnNumSkips);
@@ -151,6 +156,7 @@ int CCRISP::Initialize()
    }
 
    initialized_ = true;
+   sum_=0;
    return DEVICE_OK;
 }
 
@@ -311,9 +317,9 @@ int CCRISP::ForceSetFocusState(string focusState)
    else if (focusState == g_CRISP_f) // dither
          command << addressChar_ << "LK F=102";
    else if (focusState == g_CRISP_RFO) // reset focus offset
-         command << addressChar_ << "LK F=108";
+         command << addressChar_ << "LK F=111";
 
-   if (command.str() == "")
+		 if (command.str() == "")
       return DEVICE_OK;  // don't complain if we try to set to something else
    else
       return hub_->QueryCommandVerify(command.str(), ":A");
@@ -549,9 +555,58 @@ int CCRISP::OnDitherError(MM::PropertyBase* pProp, MM::ActionType eAct)
       vector<string> vReply = hub_->SplitAnswerOnSpace();
       if (vReply.size() <= 2)
          return DEVICE_INVALID_PROPERTY_VALUE;
-      if (!pProp->Set(vReply[2].c_str()))
+     
+	  sum_=atol(vReply[1].c_str()); 
+	  
+	  if (!pProp->Set(vReply[2].c_str()))
          return DEVICE_INVALID_PROPERTY_VALUE;
    }
+   return DEVICE_OK;
+}
+
+int CCRISP::OnSum(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   //ostringstream command; command.str("");
+   if (eAct == MM::BeforeGet)
+   {
+    /*  // always read
+      command << addressChar_ << "EXTRA X?";
+      RETURN_ON_MM_ERROR( hub_->QueryCommand(command.str()) );
+      vector<string> vReply = hub_->SplitAnswerOnSpace();
+      if (vReply.size() <= 2)
+         return DEVICE_INVALID_PROPERTY_VALUE;
+      if (!pProp->Set(vReply[1].c_str()))
+         return DEVICE_INVALID_PROPERTY_VALUE;
+		 */
+	//sum is read same time as dither error
+	pProp->Set((long)sum_);
+
+   }
+   return DEVICE_OK;
+}
+
+int CCRISP::OnOffset(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   ostringstream command; command.str("");
+   //long tmp = 0;
+   if (eAct == MM::BeforeGet)
+   {
+      if (!refreshProps_ && initialized_)
+         return DEVICE_OK;
+      //command << addressChar_ << "LK Z?";
+      //RETURN_ON_MM_ERROR ( hub_->QueryCommandVerify(command.str(), ":A") );
+      //RETURN_ON_MM_ERROR ( hub_->ParseAnswerAfterPosition2(tmp) );
+      
+	  double tmp;
+	  
+	  int ret= GetOffset(tmp);
+	  if (ret != DEVICE_OK)
+         return ret; 
+
+	  if (!pProp->Set(tmp))
+         return DEVICE_INVALID_PROPERTY_VALUE;
+   }
+
    return DEVICE_OK;
 }
 

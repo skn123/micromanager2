@@ -28,7 +28,6 @@
 //
 
 #ifdef WIN32
-#define snprintf _snprintf 
 #pragma warning(disable: 4355)
 #endif
 
@@ -83,6 +82,8 @@ const char* g_CRISP_C = "Curve";
 const char* g_CRISP_B = "Balance";
 const char* g_CRISP_RFO = "Reset Focus Offset";
 const char* g_CRISP_S = "Save to Controller";
+const char* const g_CRISPOffsetPropertyName = "Lock Offset";
+const char* const g_CRISPSumPropertyName = "Sum";
 
 using namespace std;
 
@@ -418,6 +419,11 @@ void XYStage::GetName(char* Name) const
    CDeviceUtils::CopyLimitedString(Name, g_XYStageDeviceName);
 }
 
+
+bool XYStage::SupportsDeviceDetection(void)
+{
+   return true;
+}
 
 MM::DeviceDetectionStatus XYStage::DetectDevice(void)
 {
@@ -1920,6 +1926,11 @@ void ZStage::GetName(char* Name) const
    CDeviceUtils::CopyLimitedString(Name, g_ZStageDeviceName);
 }
 
+bool ZStage::SupportsDeviceDetection(void)
+{
+   return true;
+}
+
 MM::DeviceDetectionStatus ZStage::DetectDevice(void)
 {
 
@@ -2146,6 +2157,36 @@ int ZStage::GetPositionUm(double& pos)
 	  curSteps_ = (long)zz;
 
       return DEVICE_OK;
+   }
+
+   return ERR_UNRECOGNIZED_ANSWER;
+}
+
+int ZStage::SetRelativePositionUm(double d)
+{
+   // empty the Rx serial buffer before sending command
+   ClearPort();
+
+   ostringstream command;
+   command << fixed << "R " << axis_ << "=" << d / stepSizeUm_; // in 10th of micros
+
+   string answer;
+   // query the device
+   int ret = QueryCommand(command.str().c_str(), answer);
+   if (ret != DEVICE_OK)
+      return ret;
+
+   if (answer.substr(0,2).compare(":A") == 0 || answer.substr(1,2).compare(":A") == 0)
+   {
+      // we don't know the updated position to call this
+      //this->OnStagePositionChanged(pos);
+      return DEVICE_OK;
+   }
+   // deal with error later
+   else if (answer.substr(0, 2).compare(":N") == 0 && answer.length() > 2)
+   {
+      int errNo = atoi(answer.substr(4).c_str());
+      return ERR_OFFSET + errNo;
    }
 
    return ERR_UNRECOGNIZED_ANSWER;
@@ -3627,6 +3668,11 @@ CRISP::~CRISP()
    initialized_ = false;
 }
 
+bool CRISP::SupportsDeviceDetection(void)
+{
+   return true;
+}
+
 MM::DeviceDetectionStatus CRISP::DetectDevice(void)
 {
    return ASICheckSerialPort(*this,*GetCoreCallback(), port_, answerTimeoutMs_);
@@ -3697,6 +3743,14 @@ int CRISP::Initialize()
    CreateProperty("Number of Averages", "1", MM::Integer, false, pAct);
    SetPropertyLimits("Number of Averages", 0, 10);
 
+   pAct = new CPropertyAction(this, &CRISP::OnOffset);
+   CreateProperty(g_CRISPOffsetPropertyName, "", MM::Integer, true, pAct);
+   UpdateProperty(g_CRISPOffsetPropertyName);
+
+   pAct = new CPropertyAction(this, &CRISP::OnSum);
+   CreateProperty(g_CRISPSumPropertyName, "", MM::Integer, true, pAct);
+   UpdateProperty(g_CRISPSumPropertyName);
+
    // not sure exactly when Gary made these firmware changes, but they were there by start of 2015
    if (compileDay_ >= ConvertDay(2015, 1, 1))
    {
@@ -3742,6 +3796,7 @@ int CRISP::Initialize()
       return ret;
    na_ = (double) val;
 
+   sum_=0;
    return DEVICE_OK;
 }
 
@@ -3820,6 +3875,9 @@ int CRISP::GetFocusState(std::string& focusState)
       case 'F': focusState = g_CRISP_F; break;
       case 'N': focusState = g_CRISP_N; break;
       case 'E': focusState = g_CRISP_E; break;
+      // TODO: Sometimes the controller spits out extra information when the state is 'G'
+      // Figure out what that information is, and how to handle it best.  At the moment
+      // it causes problems since it will be read by the next command!
       case 'G': focusState = g_CRISP_G; break;
       case 'f': focusState = g_CRISP_f; break;
       case 'C': focusState = g_CRISP_C; break;
@@ -3898,7 +3956,7 @@ int CRISP::ForceSetFocusState(std::string focusState)
    else if (focusState == g_CRISP_RFO)
    {
       // Reset focus offset
-      const char* command = "LK F=108";
+      const char* command = "LK F=111";
       return SetCommand(command);
    }
 
@@ -4295,7 +4353,12 @@ int CRISP::OnFocusCurve(MM::PropertyBase* pProp, MM::ActionType eAct)
          int index = 0;
          focusCurveData_[index] = "";
          bool done = false;
-         while (ret == DEVICE_OK && !done && index < SIZE_OF_FC_ARRAY)
+         // the GetSerialAnswer call will likely take more than 500ms, the likely timeout for the port set by the user
+         // instead, wait for a total of ??? seconds
+         MM::MMTime startTime = GetCurrentMMTime();
+         MM::MMTime wait(10,0);
+         bool cont = true;
+         while (cont && !done && index < SIZE_OF_FC_ARRAY)
          {
             ret = GetSerialAnswer(port_.c_str(), "\r\n", answer);
             if (answer == "end")
@@ -4310,6 +4373,8 @@ int CRISP::OnFocusCurve(MM::PropertyBase* pProp, MM::ActionType eAct)
                      focusCurveData_[index] = "";
                }
             }
+            
+            cont = (GetCurrentMMTime() - startTime) < wait;
          }
       }
      
@@ -4344,6 +4409,9 @@ int CRISP::OnSNR(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
    if (eAct == MM::BeforeGet)
    {
+      // HACK: there are still occasionally intervening messages from the controller
+      ClearPort();
+
       std::string command = "EXTRA Y?";
       std::string answer;
       int ret = QueryCommand(command.c_str(), answer);
@@ -4369,14 +4437,31 @@ int CRISP::OnDitherError(MM::PropertyBase* pProp, MM::ActionType eAct)
       if (ret != DEVICE_OK)
          return ret;
 
-      long val;
+     // long val;
       std::istringstream is(answer);
-      std::string tok;
+      std::string tok,tok2;
       for (int i=0; i <3; i++)
-         is >> tok;
-      std::istringstream s(tok);
-      s >> val;
-      pProp->Set(val);
+      {   
+		  if(i==1)
+		  {
+		  is>>tok2; //2nd "is" is sum 
+		  }
+		  is >> tok; //3rd "is" is error
+
+	  }
+
+     // std::istringstream s(tok);
+      //s >> val;
+      //pProp->Set(val);
+
+	  pProp->Set(tok.c_str());
+
+	  //std::istringstream s2(tok2);
+	 // s2 >> val;
+	  //sum_= val;
+
+	  sum_=atol(tok2.c_str());
+
    }
    return DEVICE_OK;
 }
@@ -4441,6 +4526,51 @@ int CRISP::OnInFocusRange(MM::PropertyBase* pProp, MM::ActionType eAct)
 
    return DEVICE_OK;
 }
+
+   
+int CRISP::OnSum(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+  if (eAct == MM::BeforeGet)
+   {
+     /*  std::string answer;
+      int ret = QueryCommand("EXTRA X?", answer);
+      if (ret != DEVICE_OK)
+         return ret;
+
+      long val;
+      std::istringstream is(answer);
+      std::string tok;
+      for (int i=0; i <2; i++) //SUM is 2nd last number
+         is >> tok;
+      std::istringstream s(tok);
+      s >> val;
+      pProp->Set(val); */
+	// more efficient way, sum is retrived same time as dither error
+	   pProp->Set((long)sum_);
+
+
+   }
+   return DEVICE_OK;
+}
+
+int CRISP::OnOffset(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+   if (eAct == MM::BeforeGet)
+   {
+      double numSkips;
+      //int ret = GetValue("LK Z?", numSkips);
+      
+	  int ret= GetOffset(numSkips);
+	  if (ret != DEVICE_OK)
+         return ret; 
+   
+	  if (!pProp->Set(numSkips))
+         return DEVICE_INVALID_PROPERTY_VALUE;
+   }
+
+   return DEVICE_OK;
+}
+
 
 
 
@@ -4640,6 +4770,11 @@ StateDevice::StateDevice() :
 StateDevice::~StateDevice()
 {
    Shutdown();
+}
+
+bool StateDevice::SupportsDeviceDetection(void)
+{
+   return true;
 }
 
 MM::DeviceDetectionStatus StateDevice::DetectDevice(void)
@@ -4868,6 +5003,11 @@ void LED::GetName(char* Name) const
    CDeviceUtils::CopyLimitedString(Name, g_LEDName);
 }
 
+
+bool LED::SupportsDeviceDetection(void)
+{
+   return true;
+}
 
 MM::DeviceDetectionStatus LED::DetectDevice(void)
 {

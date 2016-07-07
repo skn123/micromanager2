@@ -140,6 +140,14 @@ public:
    int SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize); 
    int GetROI(unsigned& x, unsigned& y, unsigned& xSize, unsigned& ySize); 
    int ClearROI();
+   bool SupportsMultiROI();
+   bool IsMultiROISet();
+   int GetMultiROICount(unsigned& count);
+   int SetMultiROI(const unsigned* xs, const unsigned* ys,
+           const unsigned* widths, const unsigned* heights,
+           unsigned numROIs);
+   int GetMultiROI(unsigned* xs, unsigned* ys, unsigned* widths,
+           unsigned* heights, unsigned* length);
    int PrepareSequenceAcqusition() { return DEVICE_OK; }
    int StartSequenceAcquisition(double interval);
    int StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow);
@@ -183,13 +191,17 @@ public:
    int OnShouldRotateImages(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnShouldDisplayImageNumber(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnStripeWidth(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnSupportsMultiROI(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnMultiROIFillValue(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnCCDTemp(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnIsSequenceable(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnMode(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnPCF(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnCrash(MM::PropertyBase* pProp, MM::ActionType eAct);
 
    // Special public DemoCamera methods
    void AddBackgroundAndNoise(ImgBuffer& img, double mean, double stdDev);
+   void AddSignal(ImgBuffer& img, double photonFlux, double exp, double cf);
    // this function replace normal_distribution in C++11
    double GaussDistributedValue(double mean, double std);
 
@@ -240,6 +252,12 @@ private:
    bool shouldRotateImages_;
    bool shouldDisplayImageNumber_;
    double stripeWidth_;
+   bool supportsMultiROI_;
+   int multiROIFillValue_;
+   std::vector<unsigned> multiROIXs_;
+   std::vector<unsigned> multiROIYs_;
+   std::vector<unsigned> multiROIWidths_;
+   std::vector<unsigned> multiROIHeights_;
 
 	double testProperty_[10];
    MMThreadLock imgPixelsLock_;
@@ -248,6 +266,7 @@ private:
    MySequenceThread * thd_;
    int mode_;
    ImgManipulator* imgManpl_;
+   double pcf_;
 };
 
 class MySequenceThread : public MMDeviceThreadBase
@@ -691,13 +710,17 @@ public:
    // action interface
    // ----------------
    int OnPosition(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnZoom(MM::PropertyBase* pProp, MM::ActionType eAct);
    int OnHighMag(MM::PropertyBase* pProp, MM::ActionType eAct);
+   int OnVariable(MM::PropertyBase* pProp, MM::ActionType eAct);
 
 private:
    std::string highMagString();
 
    int position_;
+   double zoomPosition_;
    double highMag_;
+   bool variable_;
 };
 
 //////////////////////////////////////////////////////////////////////////////
