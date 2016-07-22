@@ -107,7 +107,7 @@ extern "C" {
 
    // Function pointer types for module interface functions
    // (Not for use by device adapters)
-#ifndef MODULE_EXPORTS
+#ifdef MMCORE_MODULE_EXPORTS
    typedef void (*fnInitializeModuleData)();
    typedef MM::Device* (*fnCreateDevice)(const char*);
    typedef void (*fnDeleteDevice)(MM::Device*);

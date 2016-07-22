@@ -26,7 +26,7 @@
 #include "XIMEACamera.h"
 
 
-SequenceThread::SequenceThread(XIMEACamera* pCam)
+/*SequenceThread::SequenceThread(XIMEACamera* pCam)
    :intervalMs_(100.0),
    numImages_(0),
    imageCounter_(0),
@@ -58,3 +58,4 @@ int SequenceThread::svc(void) throw()
    int ret=DEVICE_ERR;
    return ret;
 }
+*/

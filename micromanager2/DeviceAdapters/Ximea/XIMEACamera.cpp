@@ -832,7 +832,11 @@ int XIMEACamera::SnapImage()
 	else
 	{
 		char buff[MAX_PATH] = "";
+#ifdef _MSC_VER
 		sprintf_s(buff, "XIMEACamera xiGetImage failed with error %d", ret);
+#else
+    snprintf(buff,MAX_PATH,"XIMEACamera xiGetImage failed with error %d", ret);
+#endif
 		LogMessage(buff);
 	}
 
